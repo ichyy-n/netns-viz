@@ -12,6 +12,23 @@ const NS_COLORS = ["#3b82f6","#10b981","#f59e0b","#a855f7","#06b6d4","#ef4444","
 let idCounter = 1;
 const uid = () => `id_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 const defaultState = () => ({ namespaces: [], bridges: [], veths: [], routes: [] });
+const GUI_STATE_KEY = "netns-viz:gui-state:v1";
+
+const loadGuiState = () => {
+  if (typeof window === "undefined") return defaultState();
+  try {
+    const raw = window.sessionStorage.getItem(GUI_STATE_KEY);
+    if (!raw) return defaultState();
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return defaultState();
+    if (!Array.isArray(parsed.namespaces) || !Array.isArray(parsed.bridges) || !Array.isArray(parsed.veths) || !Array.isArray(parsed.routes)) {
+      return defaultState();
+    }
+    return parsed;
+  } catch {
+    return defaultState();
+  }
+};
 
 const Icon = ({ d, size = 16, color = COLORS.textMuted }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>
@@ -275,7 +292,7 @@ const isElectron = () => Boolean(window.electronAPI);
    MAIN APP
    ══════════════════════════════════════════════ */
 export default function NetnsVisualizer() {
-  const [state, setState] = useState(defaultState);
+  const [state, setState] = useState(loadGuiState);
   const [dragging, setDragging] = useState(null);
   const [modal, setModal] = useState(null);
   const [cmdLog, setCmdLog] = useState([]);
@@ -302,6 +319,11 @@ export default function NetnsVisualizer() {
   const update = useCallback((fn) => setState(prev => { const n = JSON.parse(JSON.stringify(prev)); fn(n); return n; }), []);
   const addExecLog = useCallback((cmd, output, ok = true) => setExecLog(prev => [...prev, { cmd, output, success: ok, time: new Date().toLocaleTimeString() }]), []);
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [execLog]);
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(GUI_STATE_KEY, JSON.stringify(state));
+    } catch {}
+  }, [state]);
 
   /* ── Docker ── */
   const startDocker = useCallback(async () => {

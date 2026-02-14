@@ -540,17 +540,13 @@ export default function NetnsVisualizer() {
 
   const openHostTerminal = useCallback(() => {
     setShowTerminal(true);
-    const existing = terminalTabs.find(t => t.kind === 'host');
-    if (existing) {
-      setActiveTermTab(existing.tabId);
-      return;
-    }
+    const count = terminalTabs.filter(t => t.kind === 'host').length;
     const tabId = `host_${Date.now()}`;
     setTerminalTabs(prev => [...prev, {
       tabId,
       kind: 'host',
       color: COLORS.cyan,
-      label: 'host',
+      label: count === 0 ? 'host' : `host (${count + 1})`,
     }]);
     setActiveTermTab(tabId);
   }, [terminalTabs]);

@@ -191,12 +191,13 @@ export async function execStreaming(cmd, sessionId, onData) {
 
     const exec = await target.exec({
       Cmd: ['bash', '-c', wrappedCmd],
+      AttachStdin: true,
       AttachStdout: true,
       AttachStderr: true,
       Tty: true,
     })
 
-    const stream = await exec.start({ Detach: false, Tty: true })
+    const stream = await exec.start({ Detach: false, Tty: true, hijack: true, stdin: true })
     activeStreams.set(sessionId, { stream, exec, cmd })
 
     stream.on('data', (chunk) => {

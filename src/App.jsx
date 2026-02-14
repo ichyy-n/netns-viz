@@ -215,9 +215,20 @@ const NsTerminal = ({ tabId, ns, dockerReady }) => {
     }
   };
 
+  const sendStdin = async () => {
+    if (!sessionIdRef.current) return;
+    const text = input;
+    setInput("");
+    if (text) {
+      setCmdHistory(prev => [...prev, text]);
+      setHistory(prev => [...prev, { type: "stdin", text }]);
+    }
+    await window.electronAPI.docker.writeSession(sessionIdRef.current, `${text}\n`);
+  };
+
   const onKeyDown = (e) => {
     if (e.key === "c" && e.ctrlKey && running) { e.preventDefault(); killCmd(); return; }
-    if (e.key === "Enter") runCmd();
+    if (e.key === "Enter") { e.preventDefault(); if (running) sendStdin(); else runCmd(); }
     else if (e.key === "ArrowUp") {
       e.preventDefault();
       if (!cmdHistory.length) return;
@@ -241,8 +252,8 @@ const NsTerminal = ({ tabId, ns, dockerReady }) => {
         <div style={{ color: COLORS.textDim, marginBottom: 8, fontSize: 10 }}>↑↓: 履歴 · Ctrl+C: 中断 · Ctrl+L: クリア</div>
         {history.map((entry, i) => (
           <div key={i}>
-            {entry.type === "cmd"
-              ? <div><span style={{ color: ns.color }}>$</span> <span style={{ color: COLORS.text }}>{entry.text}</span></div>
+            {(entry.type === "cmd" || entry.type === "stdin")
+              ? <div><span style={{ color: entry.type === "stdin" ? COLORS.cyan : ns.color }}>{entry.type === "stdin" ? ">" : "$"}</span> <span style={{ color: COLORS.text }}>{entry.text}</span></div>
               : <pre style={{ color: entry.type === "err" ? COLORS.red : COLORS.green, margin: "2px 0 6px 0", padding: 0, whiteSpace: "pre-wrap", wordBreak: "break-all", fontSize: 10, lineHeight: 1.5 }}>{entry.text}</pre>}
           </div>
         ))}
@@ -330,9 +341,20 @@ const HostTerminal = ({ tabId, dockerReady }) => {
     }
   };
 
+  const sendStdin = async () => {
+    if (!sessionIdRef.current) return;
+    const text = input;
+    setInput("");
+    if (text) {
+      setCmdHistory(prev => [...prev, text]);
+      setHistory(prev => [...prev, { type: "stdin", text }]);
+    }
+    await window.electronAPI.docker.writeSession(sessionIdRef.current, `${text}\n`);
+  };
+
   const onKeyDown = (e) => {
     if (e.key === "c" && e.ctrlKey && running) { e.preventDefault(); killCmd(); return; }
-    if (e.key === "Enter") runCmd();
+    if (e.key === "Enter") { e.preventDefault(); if (running) sendStdin(); else runCmd(); }
     else if (e.key === "ArrowUp") {
       e.preventDefault();
       if (!cmdHistory.length) return;
@@ -356,8 +378,8 @@ const HostTerminal = ({ tabId, dockerReady }) => {
         <div style={{ color: COLORS.textDim, marginBottom: 8, fontSize: 10 }}>↑↓: 履歴 · Ctrl+C: 中断 · Ctrl+L: クリア</div>
         {history.map((entry, i) => (
           <div key={i}>
-            {entry.type === "cmd"
-              ? <div><span style={{ color: COLORS.cyan }}>$</span> <span style={{ color: COLORS.text }}>{entry.text}</span></div>
+            {(entry.type === "cmd" || entry.type === "stdin")
+              ? <div><span style={{ color: COLORS.cyan }}>{entry.type === "stdin" ? ">" : "$"}</span> <span style={{ color: COLORS.text }}>{entry.text}</span></div>
               : <pre style={{ color: entry.type === "err" ? COLORS.red : COLORS.green, margin: "2px 0 6px 0", padding: 0, whiteSpace: "pre-wrap", wordBreak: "break-all", fontSize: 10, lineHeight: 1.5 }}>{entry.text}</pre>}
           </div>
         ))}

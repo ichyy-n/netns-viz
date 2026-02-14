@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     exec: (cmd) => ipcRenderer.invoke('docker-exec', cmd),
     execStream: (cmd, sessionId) => ipcRenderer.invoke('docker-exec-stream', cmd, sessionId),
     killSession: (sessionId) => ipcRenderer.invoke('docker-kill-session', sessionId),
+    writeSession: (sessionId, data) => ipcRenderer.invoke('docker-write-session', sessionId, data),
   },
 
   stream: {

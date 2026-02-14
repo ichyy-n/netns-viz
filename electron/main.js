@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, powerMonitor } from 'electron'
 import path from 'path'
 import fs from 'fs/promises'
 import { fileURLToPath } from 'url'
-import { startContainer, stopContainer, execInContainer, execStreaming, killSession, reconnectContainer } from './docker-manager.js'
+import { startContainer, stopContainer, execInContainer, execStreaming, killSession, writeSession, reconnectContainer } from './docker-manager.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -84,6 +84,10 @@ ipcMain.handle('docker-exec-stream', async (event, cmd, sessionId) => {
 
 ipcMain.handle('docker-kill-session', async (event, sessionId) => {
   return killSession(sessionId)
+})
+
+ipcMain.handle('docker-write-session', async (event, sessionId, data) => {
+  return writeSession(sessionId, data)
 })
 
 // --- File IPC ---

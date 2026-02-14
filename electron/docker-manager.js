@@ -241,6 +241,18 @@ export async function killSession(sessionId) {
   return { success: true }
 }
 
+export async function writeSession(sessionId, data) {
+  const session = activeStreams.get(sessionId)
+  if (!session || !session.stream) return { success: false, error: 'Session not found' }
+
+  try {
+    session.stream.write(data)
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+}
+
 export async function reconnectContainer() {
   const target = await findContainerByName()
   if (!target) {

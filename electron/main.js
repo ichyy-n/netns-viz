@@ -31,9 +31,24 @@ app.whenReady().then(createWindow)
 app.whenReady().then(() => {
   powerMonitor.on('resume', async () => {
     try {
-      await reconnectContainer()
+      const result = await reconnectContainer()
+      const win = BrowserWindow.getAllWindows()[0]
+      if (win) {
+        win.webContents.send('docker-status', {
+          source: 'resume',
+          ok: Boolean(result?.success),
+          error: result?.error || null,
+        })
+      }
     } catch (e) {
-      // Non-fatal: user can still restart from the existing Docker起動 flow.
+      const win = BrowserWindow.getAllWindows()[0]
+      if (win) {
+        win.webContents.send('docker-status', {
+          source: 'resume',
+          ok: false,
+          error: e.message,
+        })
+      }
     }
   })
 })
@@ -54,6 +69,7 @@ app.on('before-quit', async () => {
 ipcMain.handle('docker-start', async () => await startContainer())
 ipcMain.handle('docker-stop', async () => await stopContainer())
 ipcMain.handle('docker-exec', async (event, cmd) => await execInContainer(cmd))
+ipcMain.handle('docker-reconnect', async () => await reconnectContainer())
 
 // --- Streaming IPC ---
 ipcMain.handle('docker-exec-stream', async (event, cmd, sessionId) => {

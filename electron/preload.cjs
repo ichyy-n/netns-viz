@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   docker: {
     start: () => ipcRenderer.invoke('docker-start'),
     stop: () => ipcRenderer.invoke('docker-stop'),
+    reconnect: () => ipcRenderer.invoke('docker-reconnect'),
     exec: (cmd) => ipcRenderer.invoke('docker-exec', cmd),
     execStream: (cmd, sessionId) => ipcRenderer.invoke('docker-exec-stream', cmd, sessionId),
     killSession: (sessionId) => ipcRenderer.invoke('docker-kill-session', sessionId),
@@ -14,6 +15,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const handler = (event, sessionId, data) => callback(sessionId, data)
       ipcRenderer.on('stream-data', handler)
       return () => ipcRenderer.removeListener('stream-data', handler)
+    },
+  },
+
+  status: {
+    onDockerStatus: (callback) => {
+      const handler = (event, payload) => callback(payload)
+      ipcRenderer.on('docker-status', handler)
+      return () => ipcRenderer.removeListener('docker-status', handler)
     },
   },
 

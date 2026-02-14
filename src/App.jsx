@@ -261,6 +261,121 @@ const NsTerminal = ({ tabId, ns, dockerReady }) => {
   );
 };
 
+const HostTerminal = ({ tabId }) => {
+  const [history, setHistory] = useState([]);
+  const [input, setInput] = useState("");
+  const [cmdHistory, setCmdHistory] = useState([]);
+  const [historyIdx, setHistoryIdx] = useState(-1);
+  const [running, setRunning] = useState(false);
+  const [sessionId, setSessionId] = useState(null);
+  const sessionIdRef = useRef(null);
+  const endRef = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [history]);
+  useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
+
+  useEffect(() => {
+    if (!isElectron() || !window.electronAPI.stream) return;
+    const cleanup = window.electronAPI.stream.onData((sid, data) => {
+      if (sid !== sessionIdRef.current) return;
+
+      if (data.includes('__STREAM_END__')) {
+        setRunning(false);
+        setSessionId(null);
+        const clean = data.replace('__STREAM_END__', '').trim();
+        if (clean) setHistory(prev => [...prev, { type: "ok", text: clean }]);
+      } else {
+        setHistory(prev => {
+          const last = prev[prev.length - 1];
+          if (last && last.type === "stream") {
+            const updated = [...prev];
+            updated[updated.length - 1] = { type: "stream", text: last.text + data };
+            return updated;
+          }
+          return [...prev, { type: "stream", text: data }];
+        });
+      }
+    });
+    return cleanup;
+  }, []);
+
+  const runCmd = async () => {
+    const cmd = input.trim();
+    if (!cmd || running) return;
+    setInput(""); setCmdHistory(prev => [...prev, cmd]); setHistoryIdx(-1);
+    setHistory(prev => [...prev, { type: "cmd", text: cmd }]);
+
+    const sid = `${tabId}-${Date.now()}`;
+    setSessionId(sid);
+    sessionIdRef.current = sid;
+    setRunning(true);
+
+    try {
+      await window.electronAPI.host.execStream(cmd, sid);
+    } catch (e) {
+      setHistory(prev => [...prev, { type: "err", text: e.message }]);
+      setRunning(false);
+    }
+    inputRef.current?.focus();
+  };
+
+  const killCmd = async () => {
+    if (sessionIdRef.current) {
+      await window.electronAPI.host.killSession(sessionIdRef.current);
+      setHistory(prev => [...prev, { type: "err", text: "^C" }]);
+      setRunning(false);
+      setSessionId(null);
+      sessionIdRef.current = null;
+    }
+  };
+
+  const onKeyDown = (e) => {
+    if (e.key === "c" && e.ctrlKey && running) { e.preventDefault(); killCmd(); return; }
+    if (e.key === "Enter") runCmd();
+    else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!cmdHistory.length) return;
+      const i = historyIdx === -1 ? cmdHistory.length - 1 : Math.max(0, historyIdx - 1);
+      setHistoryIdx(i); setInput(cmdHistory[i]);
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (historyIdx === -1) return;
+      const i = historyIdx + 1;
+      if (i >= cmdHistory.length) { setHistoryIdx(-1); setInput(""); }
+      else { setHistoryIdx(i); setInput(cmdHistory[i]); }
+    } else if (e.key === "l" && e.ctrlKey) { e.preventDefault(); setHistory([]); }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }} onClick={() => inputRef.current?.focus()}>
+      <div style={{ flex: 1, overflow: "auto", padding: "8px 10px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.6 }}>
+        <div style={{ color: COLORS.textDim, marginBottom: 4 }}>
+          host terminal: <span style={{ color: COLORS.cyan }}>local OS shell</span>
+        </div>
+        <div style={{ color: COLORS.textDim, marginBottom: 8, fontSize: 10 }}>↑↓: 履歴 · Ctrl+C: 中断 · Ctrl+L: クリア</div>
+        {history.map((entry, i) => (
+          <div key={i}>
+            {entry.type === "cmd"
+              ? <div><span style={{ color: COLORS.cyan }}>$</span> <span style={{ color: COLORS.text }}>{entry.text}</span></div>
+              : <pre style={{ color: entry.type === "err" ? COLORS.red : COLORS.green, margin: "2px 0 6px 0", padding: 0, whiteSpace: "pre-wrap", wordBreak: "break-all", fontSize: 10, lineHeight: 1.5 }}>{entry.text}</pre>}
+          </div>
+        ))}
+        <div ref={endRef} />
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderTop: `1px solid ${COLORS.border}`, background: COLORS.surface }}>
+        <span style={{ color: COLORS.cyan, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>$</span>
+        <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={onKeyDown}
+          placeholder={running ? "実行中... (Ctrl+C で中断)" : "ホストOSコマンドを入力..."}
+          style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: COLORS.text, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", padding: "4px 0" }} />
+        {running && (
+          <button onClick={killCmd} style={{ background: COLORS.red, color: "#fff", border: "none", borderRadius: 4, padding: "2px 8px", fontSize: 10, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>Stop</button>
+        )}
+      </div>
+    </div>
+  );
+};
+
 /* ── Canvas helpers ── */
 const NS_W = 380, NS_HEADER = 44, NS_ITEM_H = 44;
 
@@ -392,10 +507,28 @@ export default function NetnsVisualizer() {
     const tabId = `${ns.id}_${Date.now()}`;
     setTerminalTabs(prev => [...prev, {
       tabId,
+      kind: 'ns',
       nsId: ns.id,
       nsName: ns.name,
-      nsColor: ns.color,
+      color: ns.color,
       label: count === 0 ? ns.name : `${ns.name} (${count + 1})`,
+    }]);
+    setActiveTermTab(tabId);
+  }, [terminalTabs]);
+
+  const openHostTerminal = useCallback(() => {
+    setShowTerminal(true);
+    const existing = terminalTabs.find(t => t.kind === 'host');
+    if (existing) {
+      setActiveTermTab(existing.tabId);
+      return;
+    }
+    const tabId = `host_${Date.now()}`;
+    setTerminalTabs(prev => [...prev, {
+      tabId,
+      kind: 'host',
+      color: COLORS.cyan,
+      label: 'host',
     }]);
     setActiveTermTab(tabId);
   }, [terminalTabs]);
@@ -740,6 +873,7 @@ export default function NetnsVisualizer() {
         </>)}
         <Btn small ghost onClick={() => setShowLog(!showLog)}><Icon d={Icons.code} size={12} color={COLORS.textMuted} /> ログ</Btn>
         <Btn small ghost onClick={generateCommands} disabled={!namespaces.length}><Icon d={Icons.terminal} size={12} color={COLORS.textMuted} /> コマンド生成</Btn>
+        {isElectron() && <Btn small ghost onClick={openHostTerminal}><Icon d={Icons.terminal} size={12} color={COLORS.textMuted} /> ターミナル(host)</Btn>}
         <Btn small ghost onClick={resetAll}><Icon d={Icons.x} size={12} color={COLORS.textMuted} /> リセット</Btn>
         <div style={{ fontSize: 11, color: COLORS.textDim, fontFamily: "'JetBrains Mono', monospace" }}>{Math.round(zoom * 100)}%</div>
       </div>
@@ -889,11 +1023,11 @@ export default function NetnsVisualizer() {
               {terminalTabs.map(tab => (
                 <div key={tab.tabId} onClick={() => setActiveTermTab(tab.tabId)}
                   style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
-                    cursor: "pointer", fontWeight: 600, color: activeTermTab === tab.tabId ? tab.nsColor : COLORS.textDim,
+                    cursor: "pointer", fontWeight: 600, color: activeTermTab === tab.tabId ? tab.color : COLORS.textDim,
                     background: activeTermTab === tab.tabId ? COLORS.bg : "transparent",
-                    borderBottom: activeTermTab === tab.tabId ? `2px solid ${tab.nsColor}` : "2px solid transparent",
+                    borderBottom: activeTermTab === tab.tabId ? `2px solid ${tab.color}` : "2px solid transparent",
                     whiteSpace: "nowrap", flexShrink: 0 }}>
-                  <span style={{ width: 6, height: 6, borderRadius: 3, background: tab.nsColor, display: "inline-block" }} />
+                  <span style={{ width: 6, height: 6, borderRadius: 3, background: tab.color, display: "inline-block" }} />
                   {tab.label}
                   <span onClick={e => { e.stopPropagation(); closeTermTab(tab.tabId); }} style={{ color: COLORS.textDim, fontSize: 10, marginLeft: 4, cursor: "pointer" }}>✕</span>
                 </div>
@@ -904,7 +1038,9 @@ export default function NetnsVisualizer() {
             <div style={{ flex: 1, overflow: "hidden" }}>
               {terminalTabs.map(tab => (
                 <div key={tab.tabId} style={{ display: activeTermTab === tab.tabId ? "flex" : "none", height: "100%", flexDirection: "column" }}>
-                  <NsTerminal tabId={tab.tabId} ns={{ id: tab.nsId, name: tab.nsName, color: tab.nsColor }} dockerReady={dockerReady} />
+                  {tab.kind === 'host'
+                    ? <HostTerminal tabId={tab.tabId} />
+                    : <NsTerminal tabId={tab.tabId} ns={{ id: tab.nsId, name: tab.nsName, color: tab.color }} dockerReady={dockerReady} />}
                 </div>
               ))}
             </div>

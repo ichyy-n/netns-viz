@@ -1,0 +1,845 @@
+import { useState, useCallback, useRef, useEffect } from "react";
+
+const COLORS = {
+  bg: "#0a0e17", surface: "#111827", surfaceHover: "#1a2332",
+  border: "#1e293b", text: "#e2e8f0", textMuted: "#64748b", textDim: "#475569",
+  accent: "#3b82f6", green: "#10b981", greenGlow: "rgba(16,185,129,0.15)",
+  orange: "#f59e0b", orangeGlow: "rgba(245,158,11,0.15)",
+  red: "#ef4444", purple: "#a855f7", cyan: "#06b6d4",
+};
+
+const NS_COLORS = ["#3b82f6","#10b981","#f59e0b","#a855f7","#06b6d4","#ef4444","#ec4899","#84cc16"];
+let idCounter = 1;
+const uid = () => `id_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+const defaultState = () => ({ namespaces: [], bridges: [], veths: [], routes: [] });
+
+const Icon = ({ d, size = 16, color = COLORS.textMuted }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>
+);
+const Icons = {
+  plus: "M12 5v14M5 12h14",
+  network: "M12 2a10 10 0 100 20 10 10 0 000-20zM2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z",
+  x: "M18 6L6 18M6 6l12 12",
+  terminal: "M4 17l6-5-6-5M12 19h8",
+  code: "M16 18l6-6-6-6M8 6l-6 6 6 6",
+  save: "M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2zM17 21v-8H7v8M7 3v5h8",
+  folder: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z",
+};
+
+const Btn = ({ children, onClick, color = COLORS.accent, small, ghost, disabled, style, ...props }) => {
+  const [hover, setHover] = useState(false);
+  const bg = ghost ? "transparent" : color;
+  const hoverBg = ghost ? "rgba(255,255,255,0.05)" : color + "dd";
+  return (
+    <button onClick={onClick} disabled={disabled} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: small ? "4px 10px" : "7px 14px",
+        fontSize: small ? 11 : 12, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace",
+        color: ghost ? COLORS.textMuted : "#fff", background: hover && !disabled ? hoverBg : bg,
+        border: ghost ? `1px solid ${COLORS.border}` : "none", borderRadius: 6,
+        cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.4 : 1,
+        transition: "all 0.15s", letterSpacing: "0.02em", ...style }} {...props}>{children}</button>
+  );
+};
+
+const Modal = ({ title, onClose, children, width = 420 }) => {
+  const [pos, setPos] = useState({ x: null, y: null });
+  const [dragging, setDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const modalRef = useRef(null);
+
+  // Center on first render
+  useEffect(() => {
+    if (pos.x === null) {
+      setPos({
+        x: Math.max(20, (window.innerWidth - width) / 2),
+        y: Math.max(20, window.innerHeight * 0.15),
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e) => {
+      setPos({
+        x: Math.max(0, Math.min(window.innerWidth - 100, e.clientX - dragOffset.x)),
+        y: Math.max(0, Math.min(window.innerHeight - 50, e.clientY - dragOffset.y)),
+      });
+    };
+    const onUp = () => setDragging(false);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+  }, [dragging, dragOffset]);
+
+  const onHeaderMouseDown = (e) => {
+    const rect = modalRef.current.getBoundingClientRect();
+    setDragOffset({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    setDragging(true);
+  };
+
+  if (pos.x === null) return null;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, pointerEvents: "none" }}>
+      <div ref={modalRef} style={{
+        position: "absolute", left: pos.x, top: pos.y, width, pointerEvents: "auto",
+        background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12,
+        maxHeight: "80vh", overflow: "auto", boxShadow: "0 25px 50px rgba(0,0,0,0.5)",
+      }}>
+        <div onMouseDown={onHeaderMouseDown} style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          padding: "16px 20px", borderBottom: `1px solid ${COLORS.border}`,
+          cursor: "grab", userSelect: "none",
+        }}>
+          <span style={{ color: COLORS.text, fontWeight: 700, fontSize: 14, fontFamily: "'JetBrains Mono', monospace" }}>
+            {title}
+          </span>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+            <Icon d={Icons.x} color={COLORS.textMuted} />
+          </button>
+        </div>
+        <div style={{ padding: 20 }}>{children}</div>
+      </div>
+    </div>
+  );
+};
+
+const Input = ({ label, value, onChange, placeholder, mono }) => (
+  <label style={{ display: "block", marginBottom: 12 }}>
+    <span style={{ display: "block", fontSize: 11, color: COLORS.textMuted, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.05em", textTransform: "uppercase" }}>{label}</span>
+    <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+      style={{ width: "100%", padding: "8px 12px", fontSize: 13, fontFamily: mono ? "'JetBrains Mono', monospace" : "inherit",
+        color: COLORS.text, background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 6, outline: "none", boxSizing: "border-box" }} />
+  </label>
+);
+
+const Select = ({ label, value, onChange, options }) => (
+  <label style={{ display: "block", marginBottom: 12 }}>
+    <span style={{ display: "block", fontSize: 11, color: COLORS.textMuted, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.05em", textTransform: "uppercase" }}>{label}</span>
+    <select value={value} onChange={e => onChange(e.target.value)}
+      style={{ width: "100%", padding: "8px 12px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace",
+        color: COLORS.text, background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 6, outline: "none", boxSizing: "border-box", appearance: "auto" }}>
+      {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  </label>
+);
+
+/* ── Per-Namespace Terminal ── */
+const NsTerminal = ({ tabId, ns, dockerReady }) => {
+  const [history, setHistory] = useState([]);
+  const [input, setInput] = useState("");
+  const [cmdHistory, setCmdHistory] = useState([]);
+  const [historyIdx, setHistoryIdx] = useState(-1);
+  const [running, setRunning] = useState(false);
+  const [sessionId, setSessionId] = useState(null);
+  const sessionIdRef = useRef(null);
+  const endRef = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [history]);
+
+  // Keep ref in sync
+  useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
+
+  // Listen for streaming data
+  useEffect(() => {
+    if (!isElectron() || !window.electronAPI.stream) return;
+    const cleanup = window.electronAPI.stream.onData((sid, data) => {
+      if (sid !== sessionIdRef.current) return;
+
+      if (data.includes('__STREAM_END__')) {
+        setRunning(false);
+        setSessionId(null);
+        const clean = data.replace('__STREAM_END__', '').trim();
+        if (clean) setHistory(prev => [...prev, { type: "ok", text: clean }]);
+      } else {
+        setHistory(prev => {
+          const last = prev[prev.length - 1];
+          if (last && last.type === "stream") {
+            const updated = [...prev];
+            updated[updated.length - 1] = { type: "stream", text: last.text + data };
+            return updated;
+          }
+          return [...prev, { type: "stream", text: data }];
+        });
+      }
+    });
+    return cleanup;
+  }, []);
+
+  const runCmd = async () => {
+    const cmd = input.trim();
+    if (!cmd || !dockerReady || running) return;
+    setInput(""); setCmdHistory(prev => [...prev, cmd]); setHistoryIdx(-1);
+    setHistory(prev => [...prev, { type: "cmd", text: cmd }]);
+
+    const fullCmd = `ip netns exec ${ns.name} ${cmd}`;
+    const sid = `${tabId}-${Date.now()}`;
+    setSessionId(sid);
+    sessionIdRef.current = sid;
+    setRunning(true);
+
+    try {
+      await window.electronAPI.docker.execStream(fullCmd, sid);
+    } catch (e) {
+      setHistory(prev => [...prev, { type: "err", text: e.message }]);
+      setRunning(false);
+    }
+    inputRef.current?.focus();
+  };
+
+  const killCmd = async () => {
+    if (sessionIdRef.current) {
+      await window.electronAPI.docker.killSession(sessionIdRef.current);
+      setHistory(prev => [...prev, { type: "err", text: "^C" }]);
+      setRunning(false);
+      setSessionId(null);
+      sessionIdRef.current = null;
+    }
+  };
+
+  const onKeyDown = (e) => {
+    if (e.key === "c" && e.ctrlKey && running) { e.preventDefault(); killCmd(); return; }
+    if (e.key === "Enter") runCmd();
+    else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!cmdHistory.length) return;
+      const i = historyIdx === -1 ? cmdHistory.length - 1 : Math.max(0, historyIdx - 1);
+      setHistoryIdx(i); setInput(cmdHistory[i]);
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (historyIdx === -1) return;
+      const i = historyIdx + 1;
+      if (i >= cmdHistory.length) { setHistoryIdx(-1); setInput(""); }
+      else { setHistoryIdx(i); setInput(cmdHistory[i]); }
+    } else if (e.key === "l" && e.ctrlKey) { e.preventDefault(); setHistory([]); }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }} onClick={() => inputRef.current?.focus()}>
+      <div style={{ flex: 1, overflow: "auto", padding: "8px 10px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.6 }}>
+        <div style={{ color: COLORS.textDim, marginBottom: 4 }}>
+          namespace: <span style={{ color: ns.color }}>{ns.name}</span> — コマンドは <span style={{ color: COLORS.cyan }}>ip netns exec {ns.name}</span> で実行
+        </div>
+        <div style={{ color: COLORS.textDim, marginBottom: 8, fontSize: 10 }}>↑↓: 履歴 · Ctrl+C: 中断 · Ctrl+L: クリア</div>
+        {history.map((entry, i) => (
+          <div key={i}>
+            {entry.type === "cmd"
+              ? <div><span style={{ color: ns.color }}>$</span> <span style={{ color: COLORS.text }}>{entry.text}</span></div>
+              : <pre style={{ color: entry.type === "err" ? COLORS.red : COLORS.green, margin: "2px 0 6px 0", padding: 0, whiteSpace: "pre-wrap", wordBreak: "break-all", fontSize: 10, lineHeight: 1.5 }}>{entry.text}</pre>}
+          </div>
+        ))}
+        <div ref={endRef} />
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderTop: `1px solid ${COLORS.border}`, background: COLORS.surface }}>
+        <span style={{ color: ns.color, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>$</span>
+        <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={onKeyDown}
+          placeholder={running ? "実行中... (Ctrl+C で中断)" : "コマンドを入力..."} disabled={!dockerReady}
+          style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: COLORS.text, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", padding: "4px 0" }} />
+        {running && (
+          <button onClick={killCmd} style={{ background: COLORS.red, color: "#fff", border: "none", borderRadius: 4, padding: "2px 8px", fontSize: 10, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>Stop</button>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/* ── Canvas helpers ── */
+const NS_W = 380, NS_HEADER = 44, NS_ITEM_H = 32;
+
+function getNsHeight(ns, bridges, veths) {
+  let items = 0;
+  bridges.filter(b => b.nsId === ns.id).forEach(() => items++);
+  veths.forEach(v => { if (v.endA.nsId === ns.id) items++; if (v.endB.nsId === ns.id) items++; });
+  return NS_HEADER + Math.max(items, 1) * NS_ITEM_H + 16;
+}
+
+function getInterfacePositions(namespaces, bridges, veths) {
+  const pos = {};
+  namespaces.forEach(ns => {
+    let idx = 0;
+    bridges.filter(b => b.nsId === ns.id).forEach(b => {
+      pos[b.id] = { x: ns.x + NS_W, y: ns.y + NS_HEADER + idx * NS_ITEM_H + NS_ITEM_H / 2, side: "right" }; idx++;
+    });
+    veths.forEach(v => {
+      if (v.endA.nsId === ns.id) { pos[v.endA.id] = { x: ns.x + NS_W, y: ns.y + NS_HEADER + idx * NS_ITEM_H + NS_ITEM_H / 2, side: "right" }; idx++; }
+      if (v.endB.nsId === ns.id) { pos[v.endB.id] = { x: ns.x, y: ns.y + NS_HEADER + idx * NS_ITEM_H + NS_ITEM_H / 2, side: "left" }; idx++; }
+    });
+  });
+  return pos;
+}
+
+const isElectron = () => Boolean(window.electronAPI);
+
+/* ══════════════════════════════════════════════
+   MAIN APP
+   ══════════════════════════════════════════════ */
+export default function NetnsVisualizer() {
+  const [state, setState] = useState(defaultState);
+  const [dragging, setDragging] = useState(null);
+  const [modal, setModal] = useState(null);
+  const [cmdLog, setCmdLog] = useState([]);
+  const [showCmd, setShowCmd] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [panning, setPanning] = useState(false);
+  const [panStart, setPanStart] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const svgRef = useRef(null);
+
+  const [dockerReady, setDockerReady] = useState(false);
+  const [dockerLoading, setDockerLoading] = useState(false);
+  const [terminalTabs, setTerminalTabs] = useState([]);
+  const [activeTermTab, setActiveTermTab] = useState(null);
+  const [showTerminal, setShowTerminal] = useState(false);
+  const [execLog, setExecLog] = useState([]);
+  const [showLog, setShowLog] = useState(false);
+  const logEndRef = useRef(null);
+
+  const { namespaces, bridges, veths, routes } = state;
+  const update = useCallback((fn) => setState(prev => { const n = JSON.parse(JSON.stringify(prev)); fn(n); return n; }), []);
+  const addExecLog = useCallback((cmd, output, ok = true) => setExecLog(prev => [...prev, { cmd, output, success: ok, time: new Date().toLocaleTimeString() }]), []);
+  useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [execLog]);
+
+  /* ── Docker ── */
+  const startDocker = useCallback(async () => {
+    if (!isElectron()) return;
+    setDockerLoading(true);
+    try {
+      const r = await window.electronAPI.docker.start();
+      if (r.success) { setDockerReady(true); addExecLog('docker start', 'Container started'); }
+    } catch (e) { addExecLog('docker start', e.message, false); }
+    setDockerLoading(false);
+  }, [addExecLog]);
+
+  const execAndLog = useCallback(async (cmd) => {
+    if (!isElectron() || !dockerReady) return { success: false, output: 'Docker not ready' };
+    const r = await window.electronAPI.docker.exec(cmd);
+    addExecLog(cmd, r.output || (r.success ? 'OK' : 'Failed'), r.success);
+    return r;
+  }, [dockerReady, addExecLog]);
+
+  /* ── Terminal tabs ── */
+  const openTerminal = useCallback((ns) => {
+    setShowTerminal(true);
+    const count = terminalTabs.filter(t => t.nsId === ns.id).length;
+    const tabId = `${ns.id}_${Date.now()}`;
+    setTerminalTabs(prev => [...prev, {
+      tabId,
+      nsId: ns.id,
+      nsName: ns.name,
+      nsColor: ns.color,
+      label: count === 0 ? ns.name : `${ns.name} (${count + 1})`,
+    }]);
+    setActiveTermTab(tabId);
+  }, [terminalTabs]);
+
+  const closeTermTab = useCallback((tabId) => {
+    setTerminalTabs(prev => {
+      const next = prev.filter(t => t.tabId !== tabId);
+      if (activeTermTab === tabId) setActiveTermTab(next.length ? next[next.length - 1].tabId : null);
+      if (!next.length) setShowTerminal(false);
+      return next;
+    });
+  }, [activeTermTab]);
+
+  /* ── Save / Load ── */
+  const saveTopology = useCallback(async () => {
+    if (!isElectron()) return;
+    const r = await window.electronAPI.file.save(state);
+    if (r.success) addExecLog('save', `Saved to ${r.filePath}`);
+  }, [state, addExecLog]);
+
+  const loadTopology = useCallback(async () => {
+    if (!isElectron()) return;
+    const r = await window.electronAPI.file.load();
+    if (!r.success) return;
+    const data = r.data;
+
+    if (dockerReady) {
+      addExecLog('load', 'Cleaning current environment...');
+      for (const ns of namespaces) await execAndLog(`ip netns del ${ns.name}`);
+      addExecLog('load', 'Rebuilding from file...');
+
+      for (const ns of data.namespaces) await execAndLog(`ip netns add ${ns.name}`);
+
+      for (const b of data.bridges) {
+        const ns = data.namespaces.find(n => n.id === b.nsId);
+        if (!ns) continue;
+        const p = `ip netns exec ${ns.name}`;
+        await execAndLog(`${p} ip link add ${b.name} type bridge`);
+        await execAndLog(`${p} ip link set ${b.name} up`);
+        if (b.ip) await execAndLog(`${p} ip addr add ${b.ip} dev ${b.name}`);
+      }
+
+      for (const v of data.veths) {
+        const nsA = data.namespaces.find(n => n.id === v.endA.nsId);
+        const nsB = data.namespaces.find(n => n.id === v.endB.nsId);
+        await execAndLog(`ip link add ${v.endA.name} type veth peer name ${v.endB.name}`);
+        if (nsA) await execAndLog(`ip link set ${v.endA.name} netns ${nsA.name}`);
+        if (nsB) await execAndLog(`ip link set ${v.endB.name} netns ${nsB.name}`);
+        const pA = nsA ? `ip netns exec ${nsA.name}` : "";
+        const pB = nsB ? `ip netns exec ${nsB.name}` : "";
+        if (v.endA.bridge) { const br = data.bridges.find(b => b.id === v.endA.bridge); if (br) await execAndLog(`${pA} ip link set ${v.endA.name} master ${br.name}`); }
+        if (v.endB.bridge) { const br = data.bridges.find(b => b.id === v.endB.bridge); if (br) await execAndLog(`${pB} ip link set ${v.endB.name} master ${br.name}`); }
+        if (v.endA.ip) await execAndLog(`${pA} ip addr add ${v.endA.ip} dev ${v.endA.name}`);
+        if (v.endB.ip) await execAndLog(`${pB} ip addr add ${v.endB.ip} dev ${v.endB.name}`);
+        await execAndLog(`${pA} ip link set ${v.endA.name} up`);
+        await execAndLog(`${pB} ip link set ${v.endB.name} up`);
+      }
+
+      for (const rt of data.routes) {
+        const ns = data.namespaces.find(n => n.id === rt.nsId);
+        if (!ns) continue;
+        const dev = rt.iface ? ` dev ${rt.iface}` : "";
+        await execAndLog(`ip netns exec ${ns.name} ip route add ${rt.dest} via ${rt.gateway}${dev}`);
+      }
+      addExecLog('load', 'Environment rebuilt ✓');
+    }
+
+    setState(data);
+    setTerminalTabs([]); setActiveTermTab(null); setShowTerminal(false);
+  }, [dockerReady, namespaces, execAndLog, addExecLog]);
+
+  /* ── Drag ── */
+  const onMouseDown = useCallback((e, nsId) => {
+    e.stopPropagation();
+    const ns = namespaces.find(n => n.id === nsId);
+    setDragging({ nsId, ox: e.clientX / zoom - ns.x + pan.x / zoom, oy: e.clientY / zoom - ns.y + pan.y / zoom });
+  }, [namespaces, zoom, pan]);
+
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = e => update(s => { const ns = s.namespaces.find(n => n.id === dragging.nsId); if (ns) { ns.x = Math.max(0, e.clientX / zoom - dragging.ox + pan.x / zoom); ns.y = Math.max(0, e.clientY / zoom - dragging.oy + pan.y / zoom); } });
+    const onUp = () => setDragging(null);
+    window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+  }, [dragging, update, zoom, pan]);
+
+  /* ── Pan ── */
+  const onBgMouseDown = useCallback(e => {
+    if (e.target === svgRef.current || e.target.tagName === "rect") { setPanning(true); setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y }); }
+  }, [pan]);
+
+  useEffect(() => {
+    if (!panning) return;
+    const onMove = e => setPan({ x: e.clientX - panStart.x, y: e.clientY - panStart.y });
+    const onUp = () => setPanning(false);
+    window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+  }, [panning, panStart]);
+
+  const onWheel = useCallback(e => { e.preventDefault(); setZoom(z => Math.min(2, Math.max(0.3, z - e.deltaY * 0.001))); }, []);
+
+  /* ── Command generation ── */
+  const generateCommands = useCallback(() => {
+    const c = ["#!/bin/bash", "# === Network Namespace Setup ===", ""];
+    namespaces.forEach(ns => c.push(`ip netns add ${ns.name}`));
+    if (namespaces.length) c.push("");
+    bridges.forEach(b => {
+      const ns = namespaces.find(n => n.id === b.nsId); if (!ns) return;
+      const p = `ip netns exec ${ns.name} `;
+      c.push(`${p}ip link add ${b.name} type bridge`, `${p}ip link set ${b.name} up`);
+      if (b.ip) c.push(`${p}ip addr add ${b.ip} dev ${b.name}`);
+      c.push("");
+    });
+    veths.forEach(v => {
+      c.push(`ip link add ${v.endA.name} type veth peer name ${v.endB.name}`);
+      const nsA = namespaces.find(n => n.id === v.endA.nsId), nsB = namespaces.find(n => n.id === v.endB.nsId);
+      if (nsA) c.push(`ip link set ${v.endA.name} netns ${nsA.name}`);
+      if (nsB) c.push(`ip link set ${v.endB.name} netns ${nsB.name}`);
+      const pA = nsA ? `ip netns exec ${nsA.name} ` : "", pB = nsB ? `ip netns exec ${nsB.name} ` : "";
+      if (v.endA.bridge) { const br = bridges.find(b => b.id === v.endA.bridge); if (br) c.push(`${pA}ip link set ${v.endA.name} master ${br.name}`); }
+      if (v.endA.ip) c.push(`${pA}ip addr add ${v.endA.ip} dev ${v.endA.name}`);
+      c.push(`${pA}ip link set ${v.endA.name} up`);
+      if (v.endB.bridge) { const br = bridges.find(b => b.id === v.endB.bridge); if (br) c.push(`${pB}ip link set ${v.endB.name} master ${br.name}`); }
+      if (v.endB.ip) c.push(`${pB}ip addr add ${v.endB.ip} dev ${v.endB.name}`);
+      c.push(`${pB}ip link set ${v.endB.name} up`, "");
+    });
+    routes.forEach(r => {
+      const ns = namespaces.find(n => n.id === r.nsId); if (!ns) return;
+      c.push(`ip netns exec ${ns.name} ip route add ${r.dest} via ${r.gateway}${r.iface ? ` dev ${r.iface}` : ""}`);
+    });
+    setCmdLog(c); setShowCmd(true);
+  }, [namespaces, bridges, veths, routes]);
+
+  /* ── Add operations ── */
+  const addNs = () => { const i = namespaces.length; setModal({ type: "addNs", data: { name: `ns${i+1}`, color: NS_COLORS[i%NS_COLORS.length] } }); };
+  const addBridge = () => setModal({ type: "addBridge", data: { name: `br${bridges.length}`, nsId: namespaces[0]?.id||"", ip: "" } });
+  const addVeth = () => { const i = veths.length+1; setModal({ type: "addVeth", data: { name: `veth-pair-${i}`, endAName: `veth${i}a`, endANs: namespaces[0]?.id||"", endAIp: "", endABridge: "", endBName: `veth${i}b`, endBNs: namespaces[1]?.id||namespaces[0]?.id||"", endBIp: "", endBBridge: "" } }); };
+  const addRoute = () => setModal({ type: "addRoute", data: { nsId: namespaces[0]?.id||"", dest: "", gateway: "", iface: "" } });
+
+  const confirmModal = async () => {
+    if (!modal) return;
+    const { type, data } = modal;
+
+    if (type === "addNs") {
+      if (dockerReady) { const r = await execAndLog(`ip netns add ${data.name}`); if (!r.success) { alert(`Failed: ${r.output}`); return; } }
+      update(s => { const mx = s.namespaces.reduce((m,n) => Math.max(m,n.x), 0); s.namespaces.push({ id: uid(), name: data.name, x: s.namespaces.length === 0 ? 60 : mx + NS_W + 60, y: 80, color: data.color, isDefault: false }); });
+    } else if (type === "addBridge") {
+      const ns = namespaces.find(n => n.id === data.nsId);
+      if (dockerReady && ns) {
+        const p = `ip netns exec ${ns.name}`;
+        let r = await execAndLog(`${p} ip link add ${data.name} type bridge`); if (!r.success) { alert(`Failed: ${r.output}`); return; }
+        await execAndLog(`${p} ip link set ${data.name} up`);
+        if (data.ip) await execAndLog(`${p} ip addr add ${data.ip} dev ${data.name}`);
+      }
+      update(s => s.bridges.push({ id: uid(), name: data.name, nsId: data.nsId, ip: data.ip }));
+    } else if (type === "addVeth") {
+      if (dockerReady) {
+        const nsA = namespaces.find(n => n.id === data.endANs), nsB = namespaces.find(n => n.id === data.endBNs);
+        let r = await execAndLog(`ip link add ${data.endAName} type veth peer name ${data.endBName}`); if (!r.success) { alert(`Failed: ${r.output}`); return; }
+        if (nsA) await execAndLog(`ip link set ${data.endAName} netns ${nsA.name}`);
+        if (nsB) await execAndLog(`ip link set ${data.endBName} netns ${nsB.name}`);
+        const pA = nsA ? `ip netns exec ${nsA.name}` : "", pB = nsB ? `ip netns exec ${nsB.name}` : "";
+        if (data.endABridge) { const br = bridges.find(b => b.id === data.endABridge); if (br) await execAndLog(`${pA} ip link set ${data.endAName} master ${br.name}`); }
+        if (data.endBBridge) { const br = bridges.find(b => b.id === data.endBBridge); if (br) await execAndLog(`${pB} ip link set ${data.endBName} master ${br.name}`); }
+        if (data.endAIp) await execAndLog(`${pA} ip addr add ${data.endAIp} dev ${data.endAName}`);
+        if (data.endBIp) await execAndLog(`${pB} ip addr add ${data.endBIp} dev ${data.endBName}`);
+        await execAndLog(`${pA} ip link set ${data.endAName} up`);
+        await execAndLog(`${pB} ip link set ${data.endBName} up`);
+      }
+      update(s => s.veths.push({ id: uid(), name: data.name,
+        endA: { id: uid(), name: data.endAName, nsId: data.endANs, ip: data.endAIp, bridge: data.endABridge||null },
+        endB: { id: uid(), name: data.endBName, nsId: data.endBNs, ip: data.endBIp, bridge: data.endBBridge||null } }));
+    } else if (type === "addRoute") {
+      const ns = namespaces.find(n => n.id === data.nsId);
+      if (dockerReady && ns) {
+        const dev = data.iface ? ` dev ${data.iface}` : "";
+        await execAndLog(`ip netns exec ${ns.name} ip route add ${data.dest} via ${data.gateway}${dev}`);
+      }
+      update(s => s.routes.push({ id: uid(), nsId: data.nsId, dest: data.dest, gateway: data.gateway, iface: data.iface }));
+    }
+    setModal(null);
+  };
+
+  /* ── Delete operations ── */
+  const deleteNs = async (id) => {
+    const ns = namespaces.find(n => n.id === id);
+    if (dockerReady && ns) await execAndLog(`ip netns del ${ns.name}`);
+    update(s => {
+      s.namespaces = s.namespaces.filter(n => n.id !== id);
+      s.bridges = s.bridges.filter(b => b.nsId !== id);
+      s.veths = s.veths.filter(v => v.endA.nsId !== id && v.endB.nsId !== id);
+      s.routes = s.routes.filter(r => r.nsId !== id);
+    });
+    // 該当nsのターミナルを全部閉じる
+    setTerminalTabs(prev => {
+      const next = prev.filter(t => t.nsId !== id);
+      if (!next.length) setShowTerminal(false);
+      else if (!next.find(t => t.tabId === activeTermTab)) setActiveTermTab(next[next.length - 1].tabId);
+      return next;
+    });
+    setSelected(null);
+  };
+
+  const deleteBridge = async (id) => {
+    const br = bridges.find(b => b.id === id);
+    if (dockerReady && br) { const ns = namespaces.find(n => n.id === br.nsId); if (ns) await execAndLog(`ip netns exec ${ns.name} ip link del ${br.name}`); }
+    update(s => { s.bridges = s.bridges.filter(b => b.id !== id); s.veths.forEach(v => { if (v.endA.bridge === id) v.endA.bridge = null; if (v.endB.bridge === id) v.endB.bridge = null; }); });
+  };
+
+  const deleteVeth = async (id) => {
+    const v = veths.find(vv => vv.id === id);
+    if (dockerReady && v) { const ns = namespaces.find(n => n.id === v.endA.nsId); if (ns) await execAndLog(`ip netns exec ${ns.name} ip link del ${v.endA.name}`); }
+    update(s => { s.veths = s.veths.filter(v => v.id !== id); });
+  };
+
+  const deleteRoute = (id) => update(s => { s.routes = s.routes.filter(r => r.id !== id); });
+
+  const resetAll = async () => {
+    if (dockerReady) for (const ns of namespaces) await execAndLog(`ip netns del ${ns.name}`);
+    setState(defaultState()); setSelected(null); setTerminalTabs([]); setActiveTermTab(null); setShowTerminal(false); setExecLog([]);
+  };
+
+  const ifacePos = getInterfacePositions(namespaces, bridges, veths);
+  const nsOptions = namespaces.map(n => ({ value: n.id, label: n.name }));
+  const bridgeOptions = nsId => [{ value: "", label: "(none)" }, ...bridges.filter(b => b.nsId === nsId).map(b => ({ value: b.id, label: b.name }))];
+
+  /* ══════════════════════════════════════════════
+     RENDER
+     ══════════════════════════════════════════════ */
+  return (
+    <div style={{ width: "100vw", height: "100vh", background: COLORS.bg, display: "flex", flexDirection: "column", fontFamily: "'Segoe UI', system-ui, sans-serif", color: COLORS.text, overflow: "hidden" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:${COLORS.bg}}::-webkit-scrollbar-thumb{background:${COLORS.border};border-radius:3px}`}</style>
+
+      {/* ── Top Bar ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", borderBottom: `1px solid ${COLORS.border}`, background: COLORS.surface, flexShrink: 0, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ width: 28, height: 28, borderRadius: 6, background: `linear-gradient(135deg, ${COLORS.accent}, ${COLORS.purple})`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Icon d={Icons.network} size={15} color="#fff" />
+          </div>
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, fontSize: 14 }}>netns<span style={{ color: COLORS.accent }}>viz</span></span>
+        </div>
+        <div style={{ width: 1, height: 20, background: COLORS.border }} />
+
+        {isElectron() && (<>
+          {!dockerReady
+            ? <Btn small onClick={startDocker} disabled={dockerLoading} color={dockerLoading ? COLORS.textDim : COLORS.green}>{dockerLoading ? "⏳ 起動中..." : "🐳 Docker起動"}</Btn>
+            : <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: COLORS.green, fontFamily: "'JetBrains Mono', monospace" }}><span style={{ width: 6, height: 6, borderRadius: 3, background: COLORS.green, display: "inline-block" }} />Docker Ready</div>}
+          <div style={{ width: 1, height: 20, background: COLORS.border }} />
+        </>)}
+
+        <Btn small onClick={addNs} disabled={isElectron() && !dockerReady}><Icon d={Icons.plus} size={12} color="#fff" /> Namespace</Btn>
+        <Btn small onClick={addBridge} color={COLORS.green} disabled={!namespaces.length}><Icon d={Icons.plus} size={12} color="#fff" /> Bridge</Btn>
+        <Btn small onClick={addVeth} color={COLORS.orange} disabled={!namespaces.length}><Icon d={Icons.plus} size={12} color="#fff" /> Veth Pair</Btn>
+        <Btn small onClick={addRoute} color={COLORS.purple} disabled={!namespaces.length}><Icon d={Icons.plus} size={12} color="#fff" /> Route</Btn>
+
+        <div style={{ flex: 1 }} />
+
+        {isElectron() && (<>
+          <Btn small ghost onClick={saveTopology} disabled={!namespaces.length}><Icon d={Icons.save} size={12} color={COLORS.textMuted} /> 保存</Btn>
+          <Btn small ghost onClick={loadTopology}><Icon d={Icons.folder} size={12} color={COLORS.textMuted} /> 読込</Btn>
+        </>)}
+        <Btn small ghost onClick={() => setShowLog(!showLog)}><Icon d={Icons.code} size={12} color={COLORS.textMuted} /> ログ</Btn>
+        <Btn small ghost onClick={generateCommands} disabled={!namespaces.length}><Icon d={Icons.terminal} size={12} color={COLORS.textMuted} /> コマンド生成</Btn>
+        <Btn small ghost onClick={resetAll}><Icon d={Icons.x} size={12} color={COLORS.textMuted} /> リセット</Btn>
+        <div style={{ fontSize: 11, color: COLORS.textDim, fontFamily: "'JetBrains Mono', monospace" }}>{Math.round(zoom * 100)}%</div>
+      </div>
+
+      {/* ── Main Area ── */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+
+          {/* ── Canvas ── */}
+          <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+            <svg ref={svgRef} width="100%" height="100%" style={{ cursor: panning ? "grabbing" : "grab" }} onMouseDown={onBgMouseDown} onWheel={onWheel}>
+              <rect width="100%" height="100%" fill={COLORS.bg} />
+              <defs><pattern id="grid" width={40*zoom} height={40*zoom} patternUnits="userSpaceOnUse" x={pan.x%(40*zoom)} y={pan.y%(40*zoom)}><circle cx={1} cy={1} r={0.5} fill="#1e293b" /></pattern></defs>
+              <rect width="100%" height="100%" fill="url(#grid)" />
+
+              <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
+                {/* Veth lines */}
+                {veths.map(v => {
+                  const pA = ifacePos[v.endA.id], pB = ifacePos[v.endB.id];
+                  if (!pA || !pB) return null;
+                  const cp1x = pA.side === "right" ? pA.x+80 : pA.x-80;
+                  const cp2x = pB.side === "left" ? pB.x-80 : pB.x+80;
+                  return (
+                    <g key={v.id}>
+                      <path d={`M${pA.x},${pA.y} C${cp1x},${pA.y} ${cp2x},${pB.y} ${pB.x},${pB.y}`} stroke={COLORS.orange} strokeWidth={2} fill="none" strokeDasharray="6 4" opacity={0.6} />
+                      <circle cx={pA.x} cy={pA.y} r={4} fill={COLORS.orange} /><circle cx={pB.x} cy={pB.y} r={4} fill={COLORS.orange} />
+                      <text x={(pA.x+pB.x)/2} y={Math.min(pA.y,pB.y)-10} textAnchor="middle" fontSize={9} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace">{v.name}</text>
+                    </g>);
+                })}
+
+                {/* Namespace boxes */}
+                {namespaces.map(ns => {
+                  const h = getNsHeight(ns, bridges, veths);
+                  const isSel = selected === ns.id;
+                  return (
+                    <g key={ns.id} onMouseDown={e => onMouseDown(e, ns.id)} style={{ cursor: "move" }}>
+                      <rect x={ns.x+3} y={ns.y+3} width={NS_W} height={h} rx={10} fill="rgba(0,0,0,0.3)" />
+                      <rect x={ns.x} y={ns.y} width={NS_W} height={h} rx={10} fill={COLORS.surface} stroke={isSel ? ns.color : COLORS.border} strokeWidth={isSel ? 2 : 1} onClick={e => { e.stopPropagation(); setSelected(ns.id); }} />
+                      <rect x={ns.x} y={ns.y} width={NS_W} height={NS_HEADER} rx={10} fill={ns.color+"18"} />
+                      <rect x={ns.x} y={ns.y+NS_HEADER-1} width={NS_W} height={2} fill={ns.color+"30"} />
+                      <circle cx={ns.x+18} cy={ns.y+NS_HEADER/2} r={5} fill={ns.color} />
+                      <text x={ns.x+32} y={ns.y+NS_HEADER/2+1} dominantBaseline="middle" fontSize={13} fontWeight="700" fill={COLORS.text} fontFamily="'JetBrains Mono', monospace">{ns.name}</text>
+
+                      {/* Terminal button */}
+                      {dockerReady && (
+                        <g onClick={e => { e.stopPropagation(); openTerminal(ns); }} style={{ cursor: "pointer" }}>
+                          <rect x={ns.x+NS_W-84} y={ns.y+10} width={22} height={22} rx={4} fill={ns.color+"20"} />
+                          <text x={ns.x+NS_W-73} y={ns.y+23} fontSize={11} fill={ns.color} fontFamily="'JetBrains Mono', monospace" textAnchor="middle">{">_"}</text>
+                        </g>
+                      )}
+
+                      {/* Delete */}
+                      <g onClick={e => { e.stopPropagation(); deleteNs(ns.id); }} style={{ cursor: "pointer" }}>
+                        <rect x={ns.x+NS_W-32} y={ns.y+10} width={22} height={22} rx={4} fill="transparent" />
+                        <line x1={ns.x+NS_W-25} y1={ns.y+17} x2={ns.x+NS_W-17} y2={ns.y+25} stroke={COLORS.textDim} strokeWidth={1.5} />
+                        <line x1={ns.x+NS_W-17} y1={ns.y+17} x2={ns.x+NS_W-25} y2={ns.y+25} stroke={COLORS.textDim} strokeWidth={1.5} />
+                      </g>
+
+                      {/* Interfaces */}
+                      {(() => {
+                        let idx = 0; const items = [];
+                        bridges.filter(b => b.nsId === ns.id).forEach(b => {
+                          const y = ns.y + NS_HEADER + idx * NS_ITEM_H;
+                          items.push(<g key={b.id}>
+                            <rect x={ns.x+8} y={y+4} width={NS_W-16} height={NS_ITEM_H-6} rx={4} fill={COLORS.greenGlow} />
+                            <text x={ns.x+20} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" fontSize={11} fill={COLORS.green} fontFamily="'JetBrains Mono', monospace" fontWeight="600">🌉 {b.name}</text>
+                            {b.ip && <text x={ns.x+NS_W-50} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" textAnchor="end" fontSize={10} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace">{b.ip}</text>}
+                            <g onClick={e => { e.stopPropagation(); deleteBridge(b.id); }} style={{ cursor: "pointer" }}><text x={ns.x+NS_W-24} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" fontSize={10} fill={COLORS.red} style={{ opacity: 0.5 }}>✕</text></g>
+                          </g>); idx++;
+                        });
+                        veths.forEach(v => { ["endA","endB"].forEach(end => {
+                          if (v[end].nsId === ns.id) {
+                            const y = ns.y + NS_HEADER + idx * NS_ITEM_H;
+                            const brName = v[end].bridge ? bridges.find(b => b.id === v[end].bridge)?.name : null;
+                            items.push(<g key={v[end].id}>
+                              <rect x={ns.x+8} y={y+4} width={NS_W-16} height={NS_ITEM_H-6} rx={4} fill={COLORS.orangeGlow} />
+                              <text x={ns.x+20} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" fontSize={11} fill={COLORS.orange} fontFamily="'JetBrains Mono', monospace" fontWeight="600">🔗 {v[end].name}</text>
+                              <text x={ns.x+NS_W-50} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" textAnchor="end" fontSize={10} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace">{v[end].ip||""}{brName ? ` → ${brName}` : ""}</text>
+                              <g onClick={e => { e.stopPropagation(); deleteVeth(v.id); }} style={{ cursor: "pointer" }}><text x={ns.x+NS_W-24} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" fontSize={10} fill={COLORS.red} style={{ opacity: 0.5 }}>✕</text></g>
+                            </g>); idx++;
+                          }
+                        }); });
+                        return items;
+                      })()}
+                    </g>);
+                })}
+
+                {!namespaces.length && (
+                  <text x={300} y={200} textAnchor="middle" fontSize={14} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace">
+                    {dockerReady ? "「+ Namespace」で始めましょう" : isElectron() ? "まず「🐳 Docker起動」をクリック" : "Electronで起動するとDockerと連携できます"}
+                  </text>
+                )}
+              </g>
+            </svg>
+
+            {/* Routes overlay */}
+            {routes.length > 0 && (
+              <div style={{ position: "absolute", bottom: 16, left: 16, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: 12, maxWidth: 400, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
+                <div style={{ color: COLORS.purple, fontWeight: 700, marginBottom: 6, fontSize: 10, textTransform: "uppercase" }}>⛓ Routes</div>
+                {routes.map(r => {
+                  const ns = namespaces.find(n => n.id === r.nsId);
+                  return (<div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0", color: COLORS.textMuted }}>
+                    <span style={{ color: ns?.color }}>{ns?.name}</span><span>→</span><span style={{ color: COLORS.text }}>{r.dest}</span><span>via</span><span style={{ color: COLORS.text }}>{r.gateway}</span>
+                    {r.iface && <span>dev {r.iface}</span>}
+                    <span onClick={() => deleteRoute(r.id)} style={{ color: COLORS.red, cursor: "pointer", opacity: 0.5, marginLeft: 4 }}>✕</span>
+                  </div>);
+                })}
+              </div>
+            )}
+
+            <div style={{ position: "absolute", bottom: 16, right: 16, fontSize: 10, color: COLORS.textDim, fontFamily: "'JetBrains Mono', monospace", background: COLORS.surface+"cc", padding: "6px 10px", borderRadius: 6, border: `1px solid ${COLORS.border}` }}>
+              ドラッグ: ノード移動 · 背景ドラッグ: パン · スクロール: ズーム
+            </div>
+          </div>
+
+          {/* ── Exec Log Panel ── */}
+          {showLog && (
+            <div style={{ width: 360, borderLeft: `1px solid ${COLORS.border}`, background: COLORS.bg, display: "flex", flexDirection: "column", flexShrink: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", borderBottom: `1px solid ${COLORS.border}` }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.cyan, fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase" }}>実行ログ</span>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <Btn small ghost onClick={() => setExecLog([])}>Clear</Btn>
+                  <Btn small ghost onClick={() => setShowLog(false)}><Icon d={Icons.x} size={10} color={COLORS.textMuted} /></Btn>
+                </div>
+              </div>
+              <div style={{ flex: 1, overflow: "auto", padding: 12 }}>
+                {!execLog.length && <div style={{ color: COLORS.textDim, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", padding: 8 }}>GUIの操作ログがここに表示されます</div>}
+                {execLog.map((e, i) => (
+                  <div key={i} style={{ marginBottom: 10, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
+                    <div style={{ color: COLORS.textDim, fontSize: 9 }}>{e.time}</div>
+                    <div style={{ color: COLORS.cyan }}>$ {e.cmd}</div>
+                    {e.output && <pre style={{ color: e.success ? COLORS.green : COLORS.red, margin: "2px 0 0 0", padding: 0, fontSize: 10, whiteSpace: "pre-wrap", wordBreak: "break-all", lineHeight: 1.4 }}>{e.output}</pre>}
+                  </div>
+                ))}
+                <div ref={logEndRef} />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Terminal Panel (bottom) ── */}
+        {showTerminal && terminalTabs.length > 0 && (
+          <div style={{ height: 260, borderTop: `1px solid ${COLORS.border}`, background: COLORS.bg, display: "flex", flexDirection: "column", flexShrink: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 0, borderBottom: `1px solid ${COLORS.border}`, background: COLORS.surface, flexShrink: 0, overflow: "auto" }}>
+              {terminalTabs.map(tab => (
+                <div key={tab.tabId} onClick={() => setActiveTermTab(tab.tabId)}
+                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
+                    cursor: "pointer", fontWeight: 600, color: activeTermTab === tab.tabId ? tab.nsColor : COLORS.textDim,
+                    background: activeTermTab === tab.tabId ? COLORS.bg : "transparent",
+                    borderBottom: activeTermTab === tab.tabId ? `2px solid ${tab.nsColor}` : "2px solid transparent",
+                    whiteSpace: "nowrap", flexShrink: 0 }}>
+                  <span style={{ width: 6, height: 6, borderRadius: 3, background: tab.nsColor, display: "inline-block" }} />
+                  {tab.label}
+                  <span onClick={e => { e.stopPropagation(); closeTermTab(tab.tabId); }} style={{ color: COLORS.textDim, fontSize: 10, marginLeft: 4, cursor: "pointer" }}>✕</span>
+                </div>
+              ))}
+              <div style={{ flex: 1 }} />
+              <Btn small ghost onClick={() => setShowTerminal(false)} style={{ marginRight: 8 }}><Icon d={Icons.x} size={10} color={COLORS.textMuted} /></Btn>
+            </div>
+            <div style={{ flex: 1, overflow: "hidden" }}>
+              {terminalTabs.map(tab => (
+                <div key={tab.tabId} style={{ display: activeTermTab === tab.tabId ? "flex" : "none", height: "100%", flexDirection: "column" }}>
+                  <NsTerminal tabId={tab.tabId} ns={{ id: tab.nsId, name: tab.nsName, color: tab.nsColor }} dockerReady={dockerReady} />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Modals ── */}
+      {modal?.type === "addNs" && (
+        <Modal title="Add Namespace" onClose={() => setModal(null)}>
+          <Input label="Name" value={modal.data.name} onChange={v => setModal({...modal, data:{...modal.data, name:v}})} mono placeholder="ns-name" />
+          <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+            {NS_COLORS.map(c => <div key={c} onClick={() => setModal({...modal, data:{...modal.data, color:c}})}
+              style={{ width: 24, height: 24, borderRadius: 6, background: c, cursor: "pointer", border: modal.data.color === c ? "2px solid #fff" : "2px solid transparent" }} />)}
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <Btn ghost small onClick={() => setModal(null)}>キャンセル</Btn>
+            <Btn small onClick={confirmModal}>追加</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {modal?.type === "addBridge" && (
+        <Modal title="Add Bridge" onClose={() => setModal(null)}>
+          <Input label="Name" value={modal.data.name} onChange={v => setModal({...modal, data:{...modal.data, name:v}})} mono />
+          <Select label="Namespace" value={modal.data.nsId} onChange={v => setModal({...modal, data:{...modal.data, nsId:v}})} options={nsOptions} />
+          <Input label="IP Address" value={modal.data.ip} onChange={v => setModal({...modal, data:{...modal.data, ip:v}})} mono placeholder="10.0.0.1/24" />
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <Btn ghost small onClick={() => setModal(null)}>キャンセル</Btn>
+            <Btn small color={COLORS.green} onClick={confirmModal}>追加</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {modal?.type === "addVeth" && (
+        <Modal title="Add Veth Pair" onClose={() => setModal(null)} width={500}>
+          <Input label="Pair Name" value={modal.data.name} onChange={v => setModal({...modal, data:{...modal.data, name:v}})} mono />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <div>
+              <div style={{ fontSize: 10, color: COLORS.orange, fontWeight: 700, marginBottom: 8, fontFamily: "'JetBrains Mono', monospace" }}>END A</div>
+              <Input label="Interface Name" value={modal.data.endAName} onChange={v => setModal({...modal, data:{...modal.data, endAName:v}})} mono />
+              <Select label="Namespace" value={modal.data.endANs} onChange={v => setModal({...modal, data:{...modal.data, endANs:v}})} options={nsOptions} />
+              <Input label="IP Address" value={modal.data.endAIp} onChange={v => setModal({...modal, data:{...modal.data, endAIp:v}})} mono placeholder="10.0.0.2/24" />
+              <Select label="Bridge" value={modal.data.endABridge} onChange={v => setModal({...modal, data:{...modal.data, endABridge:v}})} options={bridgeOptions(modal.data.endANs)} />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: COLORS.orange, fontWeight: 700, marginBottom: 8, fontFamily: "'JetBrains Mono', monospace" }}>END B</div>
+              <Input label="Interface Name" value={modal.data.endBName} onChange={v => setModal({...modal, data:{...modal.data, endBName:v}})} mono />
+              <Select label="Namespace" value={modal.data.endBNs} onChange={v => setModal({...modal, data:{...modal.data, endBNs:v}})} options={nsOptions} />
+              <Input label="IP Address" value={modal.data.endBIp} onChange={v => setModal({...modal, data:{...modal.data, endBIp:v}})} mono placeholder="10.0.0.3/24" />
+              <Select label="Bridge" value={modal.data.endBBridge} onChange={v => setModal({...modal, data:{...modal.data, endBBridge:v}})} options={bridgeOptions(modal.data.endBNs)} />
+            </div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+            <Btn ghost small onClick={() => setModal(null)}>キャンセル</Btn>
+            <Btn small color={COLORS.orange} onClick={confirmModal}>追加</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {modal?.type === "addRoute" && (
+        <Modal title="Add Route" onClose={() => setModal(null)}>
+          <Select label="Namespace" value={modal.data.nsId} onChange={v => setModal({...modal, data:{...modal.data, nsId:v}})} options={nsOptions} />
+          <Input label="Destination" value={modal.data.dest} onChange={v => setModal({...modal, data:{...modal.data, dest:v}})} mono placeholder="default or 192.168.1.0/24" />
+          <Input label="Gateway" value={modal.data.gateway} onChange={v => setModal({...modal, data:{...modal.data, gateway:v}})} mono placeholder="10.0.0.1" />
+          <Input label="Interface (optional)" value={modal.data.iface} onChange={v => setModal({...modal, data:{...modal.data, iface:v}})} mono placeholder="veth1b" />
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <Btn ghost small onClick={() => setModal(null)}>キャンセル</Btn>
+            <Btn small color={COLORS.purple} onClick={confirmModal}>追加</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {showCmd && (
+        <Modal title="生成されたコマンド" onClose={() => setShowCmd(false)} width={600}>
+          <pre style={{ background: COLORS.bg, color: COLORS.green, padding: 16, borderRadius: 8, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.7, overflow: "auto", maxHeight: 400, border: `1px solid ${COLORS.border}`, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+            {cmdLog.join("\n")}
+          </pre>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+            <Btn small ghost onClick={() => setShowCmd(false)}>閉じる</Btn>
+            <Btn small onClick={() => navigator.clipboard?.writeText(cmdLog.join("\n"))}>📋 コピー</Btn>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}

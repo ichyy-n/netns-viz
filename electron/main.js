@@ -2,12 +2,10 @@ import { app, BrowserWindow, ipcMain, dialog, powerMonitor } from 'electron'
 import path from 'path'
 import fs from 'fs/promises'
 import { fileURLToPath } from 'url'
-import { spawn } from 'child_process'
 import { startContainer, stopContainer, execInContainer, execStreaming, killSession, reconnectContainer } from './docker-manager.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
-const activeHostSessions = new Map()
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -64,13 +62,6 @@ app.on('activate', () => {
 })
 
 app.on('before-quit', async () => {
-  for (const child of activeHostSessions.values()) {
-    try {
-      if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGTERM')
-      else child.kill('SIGTERM')
-    } catch (e) {}
-  }
-  activeHostSessions.clear()
   await stopContainer()
 })
 
@@ -93,60 +84,6 @@ ipcMain.handle('docker-exec-stream', async (event, cmd, sessionId) => {
 
 ipcMain.handle('docker-kill-session', async (event, sessionId) => {
   return killSession(sessionId)
-})
-
-// --- Host Terminal IPC ---
-ipcMain.handle('host-exec-stream', async (event, cmd, sessionId) => {
-  const win = BrowserWindow.fromWebContents(event.sender)
-  const child = spawn(cmd, {
-    cwd: process.cwd(),
-    shell: true,
-    detached: process.platform !== 'win32',
-  })
-
-  activeHostSessions.set(sessionId, child)
-
-  child.stdout.on('data', (chunk) => {
-    try {
-      win.webContents.send('stream-data', sessionId, chunk.toString('utf8'))
-    } catch (e) {}
-  })
-
-  child.stderr.on('data', (chunk) => {
-    try {
-      win.webContents.send('stream-data', sessionId, chunk.toString('utf8'))
-    } catch (e) {}
-  })
-
-  child.on('error', (err) => {
-    activeHostSessions.delete(sessionId)
-    try {
-      win.webContents.send('stream-data', sessionId, `[error] ${err.message}\n__STREAM_END__`)
-    } catch (e) {}
-  })
-
-  child.on('close', () => {
-    activeHostSessions.delete(sessionId)
-    try {
-      win.webContents.send('stream-data', sessionId, '__STREAM_END__')
-    } catch (e) {}
-  })
-
-  return { success: true }
-})
-
-ipcMain.handle('host-kill-session', async (event, sessionId) => {
-  const child = activeHostSessions.get(sessionId)
-  if (!child) return { success: false }
-
-  try {
-    if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGTERM')
-    else child.kill('SIGTERM')
-  } catch (e) {
-    return { success: false, error: e.message }
-  }
-  activeHostSessions.delete(sessionId)
-  return { success: true }
 })
 
 // --- File IPC ---

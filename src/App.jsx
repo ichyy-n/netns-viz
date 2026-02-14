@@ -261,7 +261,7 @@ const NsTerminal = ({ tabId, ns, dockerReady }) => {
   );
 };
 
-const HostTerminal = ({ tabId }) => {
+const HostTerminal = ({ tabId, dockerReady }) => {
   const [history, setHistory] = useState([]);
   const [input, setInput] = useState("");
   const [cmdHistory, setCmdHistory] = useState([]);
@@ -302,7 +302,7 @@ const HostTerminal = ({ tabId }) => {
 
   const runCmd = async () => {
     const cmd = input.trim();
-    if (!cmd || running) return;
+    if (!cmd || !dockerReady || running) return;
     setInput(""); setCmdHistory(prev => [...prev, cmd]); setHistoryIdx(-1);
     setHistory(prev => [...prev, { type: "cmd", text: cmd }]);
 
@@ -312,7 +312,7 @@ const HostTerminal = ({ tabId }) => {
     setRunning(true);
 
     try {
-      await window.electronAPI.host.execStream(cmd, sid);
+      await window.electronAPI.docker.execStream(cmd, sid);
     } catch (e) {
       setHistory(prev => [...prev, { type: "err", text: e.message }]);
       setRunning(false);
@@ -322,7 +322,7 @@ const HostTerminal = ({ tabId }) => {
 
   const killCmd = async () => {
     if (sessionIdRef.current) {
-      await window.electronAPI.host.killSession(sessionIdRef.current);
+      await window.electronAPI.docker.killSession(sessionIdRef.current);
       setHistory(prev => [...prev, { type: "err", text: "^C" }]);
       setRunning(false);
       setSessionId(null);
@@ -351,7 +351,7 @@ const HostTerminal = ({ tabId }) => {
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }} onClick={() => inputRef.current?.focus()}>
       <div style={{ flex: 1, overflow: "auto", padding: "8px 10px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.6 }}>
         <div style={{ color: COLORS.textDim, marginBottom: 4 }}>
-          host terminal: <span style={{ color: COLORS.cyan }}>local OS shell</span>
+          host terminal: <span style={{ color: COLORS.cyan }}>container Linux host (root namespace)</span>
         </div>
         <div style={{ color: COLORS.textDim, marginBottom: 8, fontSize: 10 }}>↑↓: 履歴 · Ctrl+C: 中断 · Ctrl+L: クリア</div>
         {history.map((entry, i) => (
@@ -366,7 +366,7 @@ const HostTerminal = ({ tabId }) => {
       <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderTop: `1px solid ${COLORS.border}`, background: COLORS.surface }}>
         <span style={{ color: COLORS.cyan, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>$</span>
         <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={onKeyDown}
-          placeholder={running ? "実行中... (Ctrl+C で中断)" : "ホストOSコマンドを入力..."}
+          placeholder={running ? "実行中... (Ctrl+C で中断)" : "コンテナホストコマンドを入力..."} disabled={!dockerReady}
           style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: COLORS.text, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", padding: "4px 0" }} />
         {running && (
           <button onClick={killCmd} style={{ background: COLORS.red, color: "#fff", border: "none", borderRadius: 4, padding: "2px 8px", fontSize: 10, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>Stop</button>
@@ -873,7 +873,7 @@ export default function NetnsVisualizer() {
         </>)}
         <Btn small ghost onClick={() => setShowLog(!showLog)}><Icon d={Icons.code} size={12} color={COLORS.textMuted} /> ログ</Btn>
         <Btn small ghost onClick={generateCommands} disabled={!namespaces.length}><Icon d={Icons.terminal} size={12} color={COLORS.textMuted} /> コマンド生成</Btn>
-        {isElectron() && <Btn small ghost onClick={openHostTerminal}><Icon d={Icons.terminal} size={12} color={COLORS.textMuted} /> ターミナル(host)</Btn>}
+        {isElectron() && <Btn small ghost onClick={openHostTerminal} disabled={!dockerReady}><Icon d={Icons.terminal} size={12} color={COLORS.textMuted} /> ターミナル(host)</Btn>}
         <Btn small ghost onClick={resetAll}><Icon d={Icons.x} size={12} color={COLORS.textMuted} /> リセット</Btn>
         <div style={{ fontSize: 11, color: COLORS.textDim, fontFamily: "'JetBrains Mono', monospace" }}>{Math.round(zoom * 100)}%</div>
       </div>
@@ -1039,7 +1039,7 @@ export default function NetnsVisualizer() {
               {terminalTabs.map(tab => (
                 <div key={tab.tabId} style={{ display: activeTermTab === tab.tabId ? "flex" : "none", height: "100%", flexDirection: "column" }}>
                   {tab.kind === 'host'
-                    ? <HostTerminal tabId={tab.tabId} />
+                    ? <HostTerminal tabId={tab.tabId} dockerReady={dockerReady} />
                     : <NsTerminal tabId={tab.tabId} ns={{ id: tab.nsId, name: tab.nsName, color: tab.color }} dockerReady={dockerReady} />}
                 </div>
               ))}

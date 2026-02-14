@@ -10,11 +10,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     killSession: (sessionId) => ipcRenderer.invoke('docker-kill-session', sessionId),
   },
 
-  host: {
-    execStream: (cmd, sessionId) => ipcRenderer.invoke('host-exec-stream', cmd, sessionId),
-    killSession: (sessionId) => ipcRenderer.invoke('host-kill-session', sessionId),
-  },
-
   stream: {
     onData: (callback) => {
       const handler = (event, sessionId, data) => callback(sessionId, data)

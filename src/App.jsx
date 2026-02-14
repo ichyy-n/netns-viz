@@ -315,29 +315,9 @@ export default function NetnsVisualizer() {
   }, [addExecLog]);
 
   useEffect(() => {
-    if (!isElectron() || !window.electronAPI.docker?.reconnect) return;
-    let cancelled = false;
-
-    const syncDockerReady = async () => {
-      try {
-        const r = await window.electronAPI.docker.reconnect();
-        if (cancelled) return;
-        if (r?.success) {
-          setDockerReady(true);
-          addExecLog('docker reconnect', 'Reconnected to running container');
-        }
-      } catch (e) {
-        if (cancelled) return;
-      }
-    };
-
-    syncDockerReady();
-    return () => { cancelled = true; };
-  }, [addExecLog]);
-
-  useEffect(() => {
     if (!isElectron() || !window.electronAPI.status?.onDockerStatus) return;
     return window.electronAPI.status.onDockerStatus((payload) => {
+      if (payload?.source !== 'resume') return;
       if (payload?.ok) {
         setDockerReady(true);
         addExecLog('docker resume', 'Reconnected after sleep');

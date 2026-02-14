@@ -12,6 +12,43 @@ const IMAGE_NAME = 'netns-viz-lab:latest'
 
 let container = null
 
+async function findContainerByName() {
+  try {
+    const target = docker.getContainer(CONTAINER_NAME)
+    await target.inspect()
+    return target
+  } catch (e) {
+    return null
+  }
+}
+
+async function getLiveContainer() {
+  if (container) {
+    try {
+      const info = await container.inspect()
+      if (info.State?.Running) return container
+    } catch (e) {
+      // fall through and try to re-acquire by name
+    }
+  }
+
+  const byName = await findContainerByName()
+  if (!byName) {
+    container = null
+    return null
+  }
+
+  try {
+    const info = await byName.inspect()
+    if (!info.State?.Running) return null
+    container = byName
+    return container
+  } catch (e) {
+    container = null
+    return null
+  }
+}
+
 async function buildImage() {
   const dockerfilePath = path.join(__dirname, '..', 'docker')
 
@@ -80,10 +117,12 @@ export async function startContainer() {
 }
 
 export async function stopContainer() {
-  if (!container) return { success: true }
+  const target = container || await findContainerByName()
+  if (!target) return { success: true }
   try {
-    await container.stop()
-    await container.remove()
+    const info = await target.inspect()
+    if (info.State?.Running) await target.stop()
+    await target.remove()
     container = null
     return { success: true }
   } catch (e) {
@@ -92,10 +131,11 @@ export async function stopContainer() {
 }
 
 export async function execInContainer(cmd) {
-  if (!container) return { success: false, output: 'Container not running' }
+  const target = await getLiveContainer()
+  if (!target) return { success: false, output: 'Container not running' }
 
   try {
-    const exec = await container.exec({
+    const exec = await target.exec({
       Cmd: ['bash', '-c', cmd],
       AttachStdout: true,
       AttachStderr: true,
@@ -142,13 +182,14 @@ export async function execInContainer(cmd) {
 const activeStreams = new Map()
 
 export async function execStreaming(cmd, sessionId, onData) {
-  if (!container) { onData('[error] Container not running\n__STREAM_END__'); return }
+  const target = await getLiveContainer()
+  if (!target) { onData('[error] Container not running\n__STREAM_END__'); return }
 
   try {
     // コマンドをラップして、PIDファイルに書き出す
     const wrappedCmd = `bash -c 'echo $$ > /tmp/pid_${sessionId}; exec ${cmd.replace(/'/g, "'\\''")}'`
 
-    const exec = await container.exec({
+    const exec = await target.exec({
       Cmd: ['bash', '-c', wrappedCmd],
       AttachStdout: true,
       AttachStderr: true,
@@ -177,12 +218,15 @@ export async function execStreaming(cmd, sessionId, onData) {
 }
 
 export async function killSession(sessionId) {
+  const target = await getLiveContainer()
+  if (!target) return { success: false }
+
   const session = activeStreams.get(sessionId)
   if (!session) return { success: false }
 
   try {
     // コンテナ内のプロセスをkillする
-    const killExec = await container.exec({
+    const killExec = await target.exec({
       Cmd: ['bash', '-c', `cat /tmp/pid_${sessionId} 2>/dev/null && kill -- -$(cat /tmp/pid_${sessionId}) 2>/dev/null; rm -f /tmp/pid_${sessionId}`],
       AttachStdout: true,
       AttachStderr: true,
@@ -195,4 +239,25 @@ export async function killSession(sessionId) {
   try { session.stream.destroy() } catch (e) {}
   activeStreams.delete(sessionId)
   return { success: true }
+}
+
+export async function reconnectContainer() {
+  const target = await findContainerByName()
+  if (!target) {
+    container = null
+    return { success: false, error: 'Container not found' }
+  }
+
+  try {
+    const info = await target.inspect()
+    if (!info.State?.Running) {
+      container = null
+      return { success: false, error: 'Container is not running' }
+    }
+    container = target
+    return { success: true }
+  } catch (e) {
+    container = null
+    return { success: false, error: e.message }
+  }
 }

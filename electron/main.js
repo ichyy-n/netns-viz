@@ -1,8 +1,8 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, powerMonitor } from 'electron'
 import path from 'path'
 import fs from 'fs/promises'
 import { fileURLToPath } from 'url'
-import { startContainer, stopContainer, execInContainer, execStreaming, killSession } from './docker-manager.js'
+import { startContainer, stopContainer, execInContainer, execStreaming, killSession, reconnectContainer } from './docker-manager.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -27,6 +27,16 @@ function createWindow() {
 }
 
 app.whenReady().then(createWindow)
+
+app.whenReady().then(() => {
+  powerMonitor.on('resume', async () => {
+    try {
+      await reconnectContainer()
+    } catch (e) {
+      // Non-fatal: user can still restart from the existing Docker起動 flow.
+    }
+  })
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

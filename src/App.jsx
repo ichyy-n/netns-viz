@@ -917,7 +917,7 @@ export default function NetnsVisualizer() {
         </>)}
 
         <Btn small onClick={addNs} disabled={isElectron() && !dockerReady}><Icon d={Icons.plus} size={12} color="#fff" /> Namespace</Btn>
-        <Btn small onClick={addBridge} color={COLORS.green} disabled={!namespaces.length}><Icon d={Icons.plus} size={12} color="#fff" /> Bridge</Btn>
+        <Btn small onClick={addBridge} color={COLORS.green} disabled={!namespaces.length}><Icon d={Icons.plus} size={12} color="#fff" /> Bridge(L2SW)</Btn>
         <Btn small onClick={addVeth} color={COLORS.orange} disabled={!namespaces.length}><Icon d={Icons.plus} size={12} color="#fff" /> Veth Pair</Btn>
         <Btn small onClick={addRoute} color={COLORS.purple} disabled={!namespaces.length}><Icon d={Icons.plus} size={12} color="#fff" /> Route</Btn>
 
@@ -1042,9 +1042,9 @@ export default function NetnsVisualizer() {
               </g>
             </svg>
 
-            <div style={{ position: "absolute", bottom: 16, right: 16, fontSize: 10, color: COLORS.textDim, fontFamily: "'JetBrains Mono', monospace", background: COLORS.surface+"cc", padding: "6px 10px", borderRadius: 6, border: `1px solid ${COLORS.border}` }}>
+            {/*<div style={{ position: "absolute", bottom: 16, right: 16, fontSize: 10, color: COLORS.textDim, fontFamily: "'JetBrains Mono', monospace", background: COLORS.surface+"cc", padding: "6px 10px", borderRadius: 6, border: `1px solid ${COLORS.border}` }}>
               ドラッグ: ノード移動 · 背景ドラッグ: パン · スクロール: ズーム
-            </div>
+            </div>*/}
           </div>
 
           {/* ── Exec Log Panel ── */}

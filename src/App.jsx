@@ -488,7 +488,7 @@ export default function NetnsVisualizer() {
       if (payload?.source !== 'resume') return;
       if (payload?.ok) {
         setDockerReady(true);
-        addExecLog('docker resume', 'Reconnected after sleep');
+        addExecLog('docker resume', payload?.restarted ? 'Container restarted after sleep' : 'Reconnected after sleep');
       } else {
         setDockerReady(false);
         addExecLog('docker resume', payload?.error || 'Reconnect failed', false);

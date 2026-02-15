@@ -11,6 +11,7 @@ const CONTAINER_NAME = 'netns-viz-lab'
 const IMAGE_NAME = 'netns-viz-lab:latest'
 
 let container = null
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 async function findContainerByName() {
   try {
@@ -380,22 +381,43 @@ export async function writeSession(sessionId, data) {
 }
 
 export async function reconnectContainer() {
-  const target = await findContainerByName()
-  if (!target) {
-    container = null
-    return { success: false, error: 'Container not found' }
+  const maxAttempts = 6
+  let lastError = 'Reconnect failed'
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const target = await findContainerByName()
+    if (!target) {
+      container = null
+      lastError = 'Container not found'
+    } else {
+      try {
+        let info = await target.inspect()
+        let restarted = false
+
+        // スリープ復帰後に停止していた場合は自動再起動する
+        if (!info.State?.Running) {
+          await target.start()
+          info = await target.inspect()
+          restarted = true
+        }
+
+        if (!info.State?.Running) {
+          throw new Error('Container is not running')
+        }
+
+        container = target
+        await execInContainer('mkdir -p /tmp /run/netns && chmod 1777 /tmp')
+        return { success: true, restarted }
+      } catch (e) {
+        container = null
+        lastError = e.message
+      }
+    }
+
+    if (attempt < maxAttempts) {
+      await sleep(1000)
+    }
   }
 
-  try {
-    const info = await target.inspect()
-    if (!info.State?.Running) {
-      container = null
-      return { success: false, error: 'Container is not running' }
-    }
-    container = target
-    return { success: true }
-  } catch (e) {
-    container = null
-    return { success: false, error: e.message }
-  }
+  return { success: false, error: lastError }
 }

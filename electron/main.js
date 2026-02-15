@@ -38,6 +38,7 @@ app.whenReady().then(() => {
           source: 'resume',
           ok: Boolean(result?.success),
           error: result?.error || null,
+          restarted: Boolean(result?.restarted),
         })
       }
     } catch (e) {

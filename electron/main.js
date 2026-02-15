@@ -61,8 +61,14 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow()
 })
 
-app.on('before-quit', async () => {
-  await stopContainer()
+let isQuitting = false
+app.on('before-quit', (e) => {
+  if (isQuitting) return
+  e.preventDefault()
+  isQuitting = true
+  stopContainer()
+    .catch((err) => console.error('stopContainer error:', err))
+    .finally(() => app.quit())
 })
 
 // --- Docker IPC ---

@@ -217,19 +217,16 @@ export async function execInContainer(cmd) {
   }
 }
 
-// ストリーミング実行
+// 永続シェルセッション
 const activeStreams = new Map()
 
-export async function execStreaming(cmd, sessionId, onData) {
+export async function openShell(sessionId, shellCmd, onData) {
   const target = await getLiveContainer()
-  if (!target) { onData('[error] Container not running\n__STREAM_END__'); return }
+  if (!target) { onData('__SHELL_EXIT__'); return }
 
   try {
-    // コマンドをラップして、PIDファイルに書き出す
-    const wrappedCmd = `bash -c 'echo $$ > /tmp/pid_${sessionId}; ${cmd.replace(/'/g, "'\\''")}'`
-
     const exec = await target.exec({
-      Cmd: ['bash', '-c', wrappedCmd],
+      Cmd: ['bash', '-c', shellCmd],
       AttachStdin: true,
       AttachStdout: true,
       AttachStderr: true,
@@ -237,48 +234,109 @@ export async function execStreaming(cmd, sessionId, onData) {
     })
 
     const stream = await exec.start({ Detach: false, Tty: true, hijack: true, stdin: true })
-    activeStreams.set(sessionId, { stream, exec, cmd })
+    activeStreams.set(sessionId, { stream, exec, markerPending: null, buffer: '', onData })
+
+    // TTYエコーとプロンプトを抑制
+    stream.write("stty -echo\nPS1=''\nPS2=''\n")
 
     stream.on('data', (chunk) => {
-      onData(chunk.toString('utf8'))
+      const text = chunk.toString('utf8')
+      const session = activeStreams.get(sessionId)
+      if (!session) return
+
+      if (session.markerPending) {
+        session.buffer += text
+        const markerIdx = session.buffer.indexOf(session.markerPending)
+        if (markerIdx !== -1) {
+          // マーカー検出 → コマンド完了
+          const before = session.buffer.substring(0, markerIdx)
+          // マーカー行とその前の改行を除去
+          const cleaned = before.replace(/\n?$/, '')
+          if (cleaned) onData(cleaned)
+          session.markerPending = null
+          session.buffer = ''
+          onData('\n__CMD_DONE__')
+        } else {
+          // マーカー未検出 → バッファの安全な部分をフラッシュ
+          const markerLen = session.markerPending.length
+          const safeLen = Math.max(0, session.buffer.length - markerLen - 1)
+          if (safeLen > 0) {
+            onData(session.buffer.substring(0, safeLen))
+            session.buffer = session.buffer.substring(safeLen)
+          }
+        }
+      } else {
+        // コマンド実行中でない → そのまま通過（シェル初期化出力など）
+        onData(text)
+      }
     })
 
     stream.on('end', () => {
       activeStreams.delete(sessionId)
-      onData('\n__STREAM_END__')
+      onData('\n__SHELL_EXIT__')
     })
 
     stream.on('error', (err) => {
       activeStreams.delete(sessionId)
-      onData(`\n[error] ${err.message}\n__STREAM_END__`)
+      onData(`\n[error] ${err.message}\n__SHELL_EXIT__`)
     })
   } catch (e) {
-    onData(`[error] ${e.message}\n__STREAM_END__`)
+    onData(`[error] ${e.message}\n__SHELL_EXIT__`)
   }
 }
 
-export async function killSession(sessionId) {
-  const target = await getLiveContainer()
-  if (!target) return { success: false }
-
+export async function sendCommand(sessionId, cmd) {
   const session = activeStreams.get(sessionId)
-  if (!session) return { success: false }
+  if (!session || !session.stream) return { success: false, error: 'Session not found' }
+
+  const marker = `__NSVIZ_DONE_${Date.now()}_${Math.random().toString(36).slice(2, 8)}__`
+  session.markerPending = marker
+  session.buffer = ''
 
   try {
-    // コンテナ内のプロセスをkillする
-    const killExec = await target.exec({
-      Cmd: ['bash', '-c', `cat /tmp/pid_${sessionId} 2>/dev/null && kill -- -$(cat /tmp/pid_${sessionId}) 2>/dev/null; rm -f /tmp/pid_${sessionId}`],
-      AttachStdout: true,
-      AttachStderr: true,
-    })
-    await killExec.start({ Detach: false })
+    // コマンドとマーカーechoを2行に分けて書き込む
+    // Ctrl+Cでcmdが中断されてもechoが実行される
+    session.stream.write(`${cmd}\necho '${marker}'\n`)
+    return { success: true }
   } catch (e) {
-    console.log('Kill error (non-fatal):', e.message)
+    return { success: false, error: e.message }
   }
+}
 
-  try { session.stream.destroy() } catch (e) {}
-  activeStreams.delete(sessionId)
+export async function closeShell(sessionId) {
+  const session = activeStreams.get(sessionId)
+  if (!session) return { success: true }
+
+  try {
+    session.stream.write('exit\n')
+    setTimeout(() => {
+      try { session.stream.destroy() } catch (e) {}
+      activeStreams.delete(sessionId)
+    }, 500)
+  } catch (e) {
+    try { session.stream.destroy() } catch (e2) {}
+    activeStreams.delete(sessionId)
+  }
   return { success: true }
+}
+
+export async function killSession(sessionId) {
+  const session = activeStreams.get(sessionId)
+  if (!session || !session.stream) return { success: false }
+
+  try {
+    // Ctrl+C (SIGINT) を送信。シェル自体は殺さない
+    session.stream.write('\x03')
+    session.markerPending = null
+    session.buffer = ''
+    // 少し待ってから __CMD_DONE__ を送信
+    if (session.onData) {
+      setTimeout(() => session.onData('\n__CMD_DONE__'), 200)
+    }
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
 }
 
 export async function writeSession(sessionId, data) {

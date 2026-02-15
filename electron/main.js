@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, powerMonitor } from 'electron'
 import path from 'path'
 import fs from 'fs/promises'
 import { fileURLToPath } from 'url'
-import { startContainer, stopContainer, execInContainer, execStreaming, killSession, writeSession, reconnectContainer } from './docker-manager.js'
+import { startContainer, stopContainer, execInContainer, openShell, sendCommand, closeShell, killSession, writeSession, reconnectContainer } from './docker-manager.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -77,15 +77,23 @@ ipcMain.handle('docker-stop', async () => await stopContainer())
 ipcMain.handle('docker-exec', async (event, cmd) => await execInContainer(cmd))
 ipcMain.handle('docker-reconnect', async () => await reconnectContainer())
 
-// --- Streaming IPC ---
-ipcMain.handle('docker-exec-stream', async (event, cmd, sessionId) => {
+// --- Shell IPC ---
+ipcMain.handle('docker-open-shell', async (event, sessionId, shellCmd) => {
   const win = BrowserWindow.fromWebContents(event.sender)
-  execStreaming(cmd, sessionId, (data) => {
+  openShell(sessionId, shellCmd, (data) => {
     try {
       win.webContents.send('stream-data', sessionId, data)
     } catch (e) {}
   })
   return { success: true }
+})
+
+ipcMain.handle('docker-send-command', async (event, sessionId, cmd) => {
+  return sendCommand(sessionId, cmd)
+})
+
+ipcMain.handle('docker-close-shell', async (event, sessionId) => {
+  return closeShell(sessionId)
 })
 
 ipcMain.handle('docker-kill-session', async (event, sessionId) => {

@@ -148,26 +148,38 @@ const NsTerminal = ({ tabId, ns, dockerReady }) => {
   const [cmdHistory, setCmdHistory] = useState([]);
   const [historyIdx, setHistoryIdx] = useState(-1);
   const [running, setRunning] = useState(false);
-  const [sessionId, setSessionId] = useState(null);
-  const sessionIdRef = useRef(null);
+  const [shellReady, setShellReady] = useState(false);
+  const sessionIdRef = useRef(`${tabId}-shell`);
   const endRef = useRef(null);
   const inputRef = useRef(null);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [history]);
 
-  // Keep ref in sync
-  useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
+  // 永続シェルを開く
+  useEffect(() => {
+    if (!isElectron() || !window.electronAPI.docker.openShell || !dockerReady) return;
+    const sid = sessionIdRef.current;
+    const shellCmd = `ip netns exec ${ns.name} bash`;
+    window.electronAPI.docker.openShell(sid, shellCmd);
+    setShellReady(true);
+    return () => { window.electronAPI.docker.closeShell(sid); };
+  }, [dockerReady, ns.name]);
 
-  // Listen for streaming data
+  // ストリームデータ受信
   useEffect(() => {
     if (!isElectron() || !window.electronAPI.stream) return;
     const cleanup = window.electronAPI.stream.onData((sid, data) => {
       if (sid !== sessionIdRef.current) return;
 
-      if (data.includes('__STREAM_END__')) {
+      if (data.includes('__SHELL_EXIT__')) {
         setRunning(false);
-        setSessionId(null);
-        const clean = data.replace('__STREAM_END__', '').trim();
+        setShellReady(false);
+        const clean = data.replace('__SHELL_EXIT__', '').trim();
+        if (clean) setHistory(prev => [...prev, { type: "ok", text: clean }]);
+        setHistory(prev => [...prev, { type: "err", text: "[shell exited]" }]);
+      } else if (data.includes('__CMD_DONE__')) {
+        setRunning(false);
+        const clean = data.replace('\n__CMD_DONE__', '').replace('__CMD_DONE__', '').trim();
         if (clean) setHistory(prev => [...prev, { type: "ok", text: clean }]);
       } else {
         setHistory(prev => {
@@ -186,18 +198,13 @@ const NsTerminal = ({ tabId, ns, dockerReady }) => {
 
   const runCmd = async () => {
     const cmd = input.trim();
-    if (!cmd || !dockerReady || running) return;
+    if (!cmd || !dockerReady || !shellReady || running) return;
     setInput(""); setCmdHistory(prev => [...prev, cmd]); setHistoryIdx(-1);
     setHistory(prev => [...prev, { type: "cmd", text: cmd }]);
-
-    const fullCmd = `ip netns exec ${ns.name} ${cmd}`;
-    const sid = `${tabId}-${Date.now()}`;
-    setSessionId(sid);
-    sessionIdRef.current = sid;
     setRunning(true);
 
     try {
-      await window.electronAPI.docker.execStream(fullCmd, sid);
+      await window.electronAPI.docker.sendCommand(sessionIdRef.current, cmd);
     } catch (e) {
       setHistory(prev => [...prev, { type: "err", text: e.message }]);
       setRunning(false);
@@ -206,17 +213,13 @@ const NsTerminal = ({ tabId, ns, dockerReady }) => {
   };
 
   const killCmd = async () => {
-    if (sessionIdRef.current) {
-      await window.electronAPI.docker.killSession(sessionIdRef.current);
-      setHistory(prev => [...prev, { type: "err", text: "^C" }]);
-      setRunning(false);
-      setSessionId(null);
-      sessionIdRef.current = null;
-    }
+    await window.electronAPI.docker.killSession(sessionIdRef.current);
+    setHistory(prev => [...prev, { type: "err", text: "^C" }]);
+    setRunning(false);
   };
 
   const sendStdin = async () => {
-    if (!sessionIdRef.current) return;
+    if (!shellReady) return;
     const text = input;
     setInput("");
     if (text) {
@@ -247,7 +250,7 @@ const NsTerminal = ({ tabId, ns, dockerReady }) => {
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }} onClick={() => inputRef.current?.focus()}>
       <div style={{ flex: 1, overflow: "auto", padding: "8px 10px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.6 }}>
         <div style={{ color: COLORS.textDim, marginBottom: 4 }}>
-          namespace: <span style={{ color: ns.color }}>{ns.name}</span> — コマンドは <span style={{ color: COLORS.cyan }}>ip netns exec {ns.name}</span> で実行
+          namespace: <span style={{ color: ns.color }}>{ns.name}</span> — 永続シェル (bash)
         </div>
         <div style={{ color: COLORS.textDim, marginBottom: 8, fontSize: 10 }}>↑↓: 履歴 · Ctrl+C: 中断 · Ctrl+L: クリア</div>
         {history.map((entry, i) => (
@@ -262,7 +265,7 @@ const NsTerminal = ({ tabId, ns, dockerReady }) => {
       <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderTop: `1px solid ${COLORS.border}`, background: COLORS.surface }}>
         <span style={{ color: ns.color, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>$</span>
         <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={onKeyDown}
-          placeholder={running ? "実行中... (Ctrl+C で中断)" : "コマンドを入力..."} disabled={!dockerReady}
+          placeholder={!shellReady ? "シェル未接続..." : running ? "実行中... (Ctrl+C で中断)" : "コマンドを入力..."} disabled={!dockerReady || !shellReady}
           style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: COLORS.text, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", padding: "4px 0" }} />
         {running && (
           <button onClick={killCmd} style={{ background: COLORS.red, color: "#fff", border: "none", borderRadius: 4, padding: "2px 8px", fontSize: 10, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>Stop</button>
@@ -278,23 +281,37 @@ const HostTerminal = ({ tabId, dockerReady }) => {
   const [cmdHistory, setCmdHistory] = useState([]);
   const [historyIdx, setHistoryIdx] = useState(-1);
   const [running, setRunning] = useState(false);
-  const [sessionId, setSessionId] = useState(null);
-  const sessionIdRef = useRef(null);
+  const [shellReady, setShellReady] = useState(false);
+  const sessionIdRef = useRef(`${tabId}-shell`);
   const endRef = useRef(null);
   const inputRef = useRef(null);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [history]);
-  useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
 
+  // 永続シェルを開く
+  useEffect(() => {
+    if (!isElectron() || !window.electronAPI.docker.openShell || !dockerReady) return;
+    const sid = sessionIdRef.current;
+    window.electronAPI.docker.openShell(sid, 'bash');
+    setShellReady(true);
+    return () => { window.electronAPI.docker.closeShell(sid); };
+  }, [dockerReady]);
+
+  // ストリームデータ受信
   useEffect(() => {
     if (!isElectron() || !window.electronAPI.stream) return;
     const cleanup = window.electronAPI.stream.onData((sid, data) => {
       if (sid !== sessionIdRef.current) return;
 
-      if (data.includes('__STREAM_END__')) {
+      if (data.includes('__SHELL_EXIT__')) {
         setRunning(false);
-        setSessionId(null);
-        const clean = data.replace('__STREAM_END__', '').trim();
+        setShellReady(false);
+        const clean = data.replace('__SHELL_EXIT__', '').trim();
+        if (clean) setHistory(prev => [...prev, { type: "ok", text: clean }]);
+        setHistory(prev => [...prev, { type: "err", text: "[shell exited]" }]);
+      } else if (data.includes('__CMD_DONE__')) {
+        setRunning(false);
+        const clean = data.replace('\n__CMD_DONE__', '').replace('__CMD_DONE__', '').trim();
         if (clean) setHistory(prev => [...prev, { type: "ok", text: clean }]);
       } else {
         setHistory(prev => {
@@ -313,17 +330,13 @@ const HostTerminal = ({ tabId, dockerReady }) => {
 
   const runCmd = async () => {
     const cmd = input.trim();
-    if (!cmd || !dockerReady || running) return;
+    if (!cmd || !dockerReady || !shellReady || running) return;
     setInput(""); setCmdHistory(prev => [...prev, cmd]); setHistoryIdx(-1);
     setHistory(prev => [...prev, { type: "cmd", text: cmd }]);
-
-    const sid = `${tabId}-${Date.now()}`;
-    setSessionId(sid);
-    sessionIdRef.current = sid;
     setRunning(true);
 
     try {
-      await window.electronAPI.docker.execStream(cmd, sid);
+      await window.electronAPI.docker.sendCommand(sessionIdRef.current, cmd);
     } catch (e) {
       setHistory(prev => [...prev, { type: "err", text: e.message }]);
       setRunning(false);
@@ -332,17 +345,13 @@ const HostTerminal = ({ tabId, dockerReady }) => {
   };
 
   const killCmd = async () => {
-    if (sessionIdRef.current) {
-      await window.electronAPI.docker.killSession(sessionIdRef.current);
-      setHistory(prev => [...prev, { type: "err", text: "^C" }]);
-      setRunning(false);
-      setSessionId(null);
-      sessionIdRef.current = null;
-    }
+    await window.electronAPI.docker.killSession(sessionIdRef.current);
+    setHistory(prev => [...prev, { type: "err", text: "^C" }]);
+    setRunning(false);
   };
 
   const sendStdin = async () => {
-    if (!sessionIdRef.current) return;
+    if (!shellReady) return;
     const text = input;
     setInput("");
     if (text) {
@@ -373,7 +382,7 @@ const HostTerminal = ({ tabId, dockerReady }) => {
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }} onClick={() => inputRef.current?.focus()}>
       <div style={{ flex: 1, overflow: "auto", padding: "8px 10px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.6 }}>
         <div style={{ color: COLORS.textDim, marginBottom: 4 }}>
-          host terminal: <span style={{ color: COLORS.cyan }}>container Linux host (root namespace)</span>
+          host terminal: <span style={{ color: COLORS.cyan }}>container Linux host (root namespace)</span> — 永続シェル (bash)
         </div>
         <div style={{ color: COLORS.textDim, marginBottom: 8, fontSize: 10 }}>↑↓: 履歴 · Ctrl+C: 中断 · Ctrl+L: クリア</div>
         {history.map((entry, i) => (
@@ -388,7 +397,7 @@ const HostTerminal = ({ tabId, dockerReady }) => {
       <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderTop: `1px solid ${COLORS.border}`, background: COLORS.surface }}>
         <span style={{ color: COLORS.cyan, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>$</span>
         <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={onKeyDown}
-          placeholder={running ? "実行中... (Ctrl+C で中断)" : "コンテナホストコマンドを入力..."} disabled={!dockerReady}
+          placeholder={!shellReady ? "シェル未接続..." : running ? "実行中... (Ctrl+C で中断)" : "コンテナホストコマンドを入力..."} disabled={!dockerReady || !shellReady}
           style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: COLORS.text, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", padding: "4px 0" }} />
         {running && (
           <button onClick={killCmd} style={{ background: COLORS.red, color: "#fff", border: "none", borderRadius: 4, padding: "2px 8px", fontSize: 10, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>Stop</button>
@@ -552,6 +561,9 @@ export default function NetnsVisualizer() {
   }, [terminalTabs]);
 
   const closeTermTab = useCallback((tabId) => {
+    if (isElectron() && window.electronAPI.docker.closeShell) {
+      window.electronAPI.docker.closeShell(`${tabId}-shell`);
+    }
     setTerminalTabs(prev => {
       const next = prev.filter(t => t.tabId !== tabId);
       if (activeTermTab === tabId) setActiveTermTab(next.length ? next[next.length - 1].tabId : null);

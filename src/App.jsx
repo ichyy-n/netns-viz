@@ -250,7 +250,7 @@ const NsTerminal = ({ tabId, ns, dockerReady }) => {
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }} onClick={() => inputRef.current?.focus()}>
       <div style={{ flex: 1, overflow: "auto", padding: "8px 10px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.6 }}>
         <div style={{ color: COLORS.textDim, marginBottom: 4 }}>
-          namespace: <span style={{ color: ns.color }}>{ns.name}</span> — 永続シェル (bash)
+          namespace: <span style={{ color: ns.color }}>{ns.name}</span> — コマンドは <span style={{ color: COLORS.cyan }}>ip netns exec {ns.name}</span> で実行
         </div>
         <div style={{ color: COLORS.textDim, marginBottom: 8, fontSize: 10 }}>↑↓: 履歴 · Ctrl+C: 中断 · Ctrl+L: クリア</div>
         {history.map((entry, i) => (
@@ -382,7 +382,7 @@ const HostTerminal = ({ tabId, dockerReady }) => {
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }} onClick={() => inputRef.current?.focus()}>
       <div style={{ flex: 1, overflow: "auto", padding: "8px 10px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.6 }}>
         <div style={{ color: COLORS.textDim, marginBottom: 4 }}>
-          host terminal: <span style={{ color: COLORS.cyan }}>container Linux host (root namespace)</span> — 永続シェル (bash)
+          host terminal: <span style={{ color: COLORS.cyan }}>container Linux host (root namespace)</span> 
         </div>
         <div style={{ color: COLORS.textDim, marginBottom: 8, fontSize: 10 }}>↑↓: 履歴 · Ctrl+C: 中断 · Ctrl+L: クリア</div>
         {history.map((entry, i) => (
@@ -709,7 +709,33 @@ export default function NetnsVisualizer() {
     return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
   }, [panning, panStart]);
 
-  const onWheel = useCallback(e => { e.preventDefault(); setZoom(z => Math.min(2, Math.max(0.3, z - e.deltaY * 0.001))); }, []);
+  const onWheel = useCallback((e) => {
+    e.preventDefault();
+    if (e.ctrlKey) {
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      setZoom((prevZoom) => {
+        const nextZoom = Math.min(2, Math.max(0.3, prevZoom - e.deltaY * 0.0015));
+        setPan((prevPan) => {
+          const wx = (cx - prevPan.x) / prevZoom;
+          const wy = (cy - prevPan.y) / prevZoom;
+          return {
+            x: cx - wx * nextZoom,
+            y: cy - wy * nextZoom,
+          };
+        });
+        return nextZoom;
+      });
+      return;
+    }
+
+    setPan((prev) => ({
+      x: prev.x - e.deltaX,
+      y: prev.y - e.deltaY,
+    }));
+  }, []);
 
   /* ── Command generation ── */
   const generateCommands = useCallback(() => {

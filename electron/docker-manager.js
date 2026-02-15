@@ -85,15 +85,55 @@ async function buildImage() {
   return IMAGE_NAME
 }
 
-export async function startContainer() {
-  // 既存コンテナを削除
-  try {
-    const existing = docker.getContainer(CONTAINER_NAME)
-    const info = await existing.inspect()
-    if (info.State.Running) await existing.stop()
-    await existing.remove()
-  } catch (e) {}
+async function cleanupNetns() {
+  // ip -all netns delete で一括削除を試みる
+  const result = await execInContainer('ip -all netns delete')
+  if (!result.success) {
+    // 失敗した場合は1つずつ削除
+    console.log('ip -all netns delete failed, falling back to individual deletion')
+    const list = await execInContainer('ip netns list')
+    if (list.success && list.output.trim()) {
+      const names = list.output.trim().split('\n').map(line => line.split(/\s/)[0]).filter(Boolean)
+      for (const ns of names) {
+        await execInContainer(`ip netns del ${ns}`)
+      }
+    }
+  }
+  console.log('Netns cleanup done')
+}
 
+export async function startContainer() {
+  const existing = await findContainerByName()
+
+  if (existing) {
+    const info = await existing.inspect()
+
+    if (info.State?.Running) {
+      // コンテナが動いている → そのまま再利用、netnsだけクリーンアップ
+      console.log('Container already running, reusing')
+      container = existing
+      await cleanupNetns()
+      return { success: true }
+    }
+
+    // コンテナが停止している → 起動して再利用
+    console.log('Container exists but stopped, starting')
+    container = existing
+    await container.start()
+    console.log('Container started')
+    await cleanupNetns()
+
+    // ツールが入っているか確認
+    const check = await execInContainer('ip -V')
+    if (!check.success) {
+      console.log('Installing tools...')
+      await execInContainer('apt-get update -qq && apt-get install -y -qq iproute2 iputils-ping')
+    }
+
+    return { success: true }
+  }
+
+  // コンテナが存在しない → 新規作成
   const imageName = await buildImage()
 
   container = await docker.createContainer({
@@ -122,7 +162,6 @@ export async function stopContainer() {
   try {
     const info = await target.inspect()
     if (info.State?.Running) await target.stop()
-    await target.remove()
     container = null
     return { success: true }
   } catch (e) {

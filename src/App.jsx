@@ -976,8 +976,8 @@ export default function NetnsVisualizer() {
                       {/* Route button */}
                       {dockerReady && (
                         <g onClick={e => { e.stopPropagation(); showRouteTable(ns); }} style={{ cursor: "pointer" }}>
-                          <rect x={ns.x+NS_W-110} y={ns.y+10} width={22} height={22} rx={4} fill={COLORS.purple+"20"} />
-                          <text x={ns.x+NS_W-99} y={ns.y+23} fontSize={10} fill={COLORS.purple} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">R</text>
+                          <rect x={ns.x+NS_W-110} y={ns.y+10} width={22} height={22} rx={4} fill={ns.color+"20"} />
+                          <text x={ns.x+NS_W-99} y={ns.y+23} fontSize={10} fill={ns.color} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">R</text>
                         </g>
                       )}
 

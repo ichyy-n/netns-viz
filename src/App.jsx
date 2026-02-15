@@ -671,7 +671,7 @@ export default function NetnsVisualizer() {
             const next = JSON.parse(JSON.stringify(prev));
             updates.forEach(u => {
               const veth = next.veths.find(vv => vv.id === u.vethId);
-              if (veth && !veth[u.end].mac) veth[u.end].mac = u.mac;
+              if (veth) veth[u.end].mac = u.mac;
             });
             return next;
           });

@@ -217,6 +217,14 @@ export async function execInContainer(cmd) {
   }
 }
 
+// ANSIエスケープシーケンス除去
+function stripAnsi(text) {
+  return text
+    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')   // CSI sequences ([?2004h, 色コード等)
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '') // OSC sequences (ターミナルタイトル等)
+    .replace(/\r/g, '')
+}
+
 // 永続シェルセッション
 const activeStreams = new Map()
 
@@ -236,38 +244,53 @@ export async function openShell(sessionId, shellCmd, onData) {
     const stream = await exec.start({ Detach: false, Tty: true, hijack: true, stdin: true })
     activeStreams.set(sessionId, { stream, exec, markerPending: null, buffer: '', onData })
 
-    // TTYエコーとプロンプトを抑制
-    stream.write("stty -echo\nPS1=''\nPS2=''\n")
-
+    // リスナーを先に登録してから初期化コマンドを送信（エコーバックを確実にキャッチするため）
     stream.on('data', (chunk) => {
       const text = chunk.toString('utf8')
       const session = activeStreams.get(sessionId)
       if (!session) return
 
-      if (session.markerPending) {
-        session.buffer += text
-        const markerIdx = session.buffer.indexOf(session.markerPending)
-        if (markerIdx !== -1) {
-          // マーカー検出 → コマンド完了
-          const before = session.buffer.substring(0, markerIdx)
-          // マーカー行とその前の改行を除去
-          const cleaned = before.replace(/\n?$/, '')
-          if (cleaned) onData(cleaned)
-          session.markerPending = null
-          session.buffer = ''
-          onData('\n__CMD_DONE__')
-        } else {
-          // マーカー未検出 → バッファの安全な部分をフラッシュ
-          const markerLen = session.markerPending.length
-          const safeLen = Math.max(0, session.buffer.length - markerLen - 1)
-          if (safeLen > 0) {
-            onData(session.buffer.substring(0, safeLen))
-            session.buffer = session.buffer.substring(safeLen)
-          }
+      // コマンド実行中でない → 全て破棄（初期化出力・プロンプト等のノイズ）
+      if (!session.markerPending) return
+
+      session.buffer += text
+      // ANSIストリップ後のバッファでマーカーを検索（エスケープシーケンスがマーカーを分断する場合に対応）
+      const strippedBuf = stripAnsi(session.buffer)
+      const markerIdx = strippedBuf.indexOf(session.markerPending)
+      if (markerIdx !== -1) {
+        // マーカー検出 → コマンド完了
+        const marker = session.markerPending
+        let output = strippedBuf.substring(0, markerIdx).replace(/\n+$/, '')
+        // コマンドエコーとechoマーカーコマンドを除去（readline無効化が効かなかった場合のフォールバック）
+        if (session.sentCmd) {
+          const lines = output.split('\n')
+          // 先頭のコマンドエコーを除去
+          if (lines.length && lines[0].trim() === session.sentCmd.trim()) lines.shift()
+          // echo marker コマンドのエコーを除去
+          const echoLine = `echo '${marker}'`
+          const echoIdx = lines.findIndex(l => l.trim() === echoLine)
+          if (echoIdx !== -1) lines.splice(echoIdx, 1)
+          output = lines.join('\n').replace(/^\n+|\n+$/g, '')
         }
+        if (output) onData(output)
+        session.markerPending = null
+        session.sentCmd = null
+        session.buffer = ''
+        onData('\n__CMD_DONE__')
       } else {
-        // コマンド実行中でない → そのまま通過（シェル初期化出力など）
-        onData(text)
+        // マーカー未検出 → マーカー行以外の完全な行をフラッシュ
+        const lines = strippedBuf.split('\n')
+        const markerPrefix = '__NSVIZ_DONE_'
+        let flushUpTo = 0
+        // 最後の要素は未完成行の可能性があるので除外（i < length - 1）
+        for (let i = 0; i < lines.length - 1; i++) {
+          if (lines[i].trimStart().startsWith(markerPrefix)) break
+          flushUpTo = i + 1
+        }
+        if (flushUpTo > 0) {
+          onData(lines.slice(0, flushUpTo).join('\n') + '\n')
+          session.buffer = lines.slice(flushUpTo).join('\n')
+        }
       }
     })
 
@@ -280,6 +303,9 @@ export async function openShell(sessionId, shellCmd, onData) {
       activeStreams.delete(sessionId)
       onData(`\n[error] ${err.message}\n__SHELL_EXIT__`)
     })
+
+    // TTYエコーとプロンプトを抑制
+    stream.write("stty -echo\nPS1=''\nPS2=''\n")
   } catch (e) {
     onData(`[error] ${e.message}\n__SHELL_EXIT__`)
   }
@@ -291,6 +317,7 @@ export async function sendCommand(sessionId, cmd) {
 
   const marker = `__NSVIZ_DONE_${Date.now()}_${Math.random().toString(36).slice(2, 8)}__`
   session.markerPending = marker
+  session.sentCmd = cmd
   session.buffer = ''
 
   try {
@@ -307,15 +334,16 @@ export async function closeShell(sessionId) {
   const session = activeStreams.get(sessionId)
   if (!session) return { success: true }
 
+  // 即座にMapから削除しリスナーを解除（古いセッションの__SHELL_EXIT__が新セッションに影響しないように）
+  activeStreams.delete(sessionId)
   try {
+    session.stream.removeAllListeners()
     session.stream.write('exit\n')
     setTimeout(() => {
       try { session.stream.destroy() } catch (e) {}
-      activeStreams.delete(sessionId)
     }, 500)
   } catch (e) {
     try { session.stream.destroy() } catch (e2) {}
-    activeStreams.delete(sessionId)
   }
   return { success: true }
 }

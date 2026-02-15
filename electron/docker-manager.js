@@ -102,26 +102,61 @@ async function cleanupNetns() {
   console.log('Netns cleanup done')
 }
 
+async function ensureRuntimeDirs() {
+  // /tmp が削除されるとシェル実行や一時ファイル作成が壊れるため毎回補正する
+  const result = await execInContainer('mkdir -p /tmp /run/netns && chmod 1777 /tmp')
+  if (!result.success) {
+    console.log('Failed to ensure runtime dirs:', result.output)
+  }
+}
+
 export async function startContainer() {
-  const existing = await findContainerByName()
+  try {
+    const existing = await findContainerByName()
 
-  if (existing) {
-    const info = await existing.inspect()
+    if (existing) {
+      const info = await existing.inspect()
 
-    if (info.State?.Running) {
-      // コンテナが動いている → そのまま再利用、netnsだけクリーンアップ
-      console.log('Container already running, reusing')
+      if (info.State?.Running) {
+        // コンテナが動いている → そのまま再利用、netnsだけクリーンアップ
+        console.log('Container already running, reusing')
+        container = existing
+        await ensureRuntimeDirs()
+        await cleanupNetns()
+        return { success: true }
+      }
+
+      // コンテナが停止している → 起動して再利用
+      console.log('Container exists but stopped, starting')
       container = existing
+      await container.start()
+      console.log('Container started')
+      await ensureRuntimeDirs()
       await cleanupNetns()
+
+      // ツールが入っているか確認
+      const check = await execInContainer('ip -V')
+      if (!check.success) {
+        console.log('Installing tools...')
+        await execInContainer('apt-get update -qq && apt-get install -y -qq iproute2 iputils-ping')
+      }
+
       return { success: true }
     }
 
-    // コンテナが停止している → 起動して再利用
-    console.log('Container exists but stopped, starting')
-    container = existing
+    // コンテナが存在しない → 新規作成
+    const imageName = await buildImage()
+
+    container = await docker.createContainer({
+      Image: imageName,
+      name: CONTAINER_NAME,
+      Cmd: ['sleep', 'infinity'],
+      HostConfig: { Privileged: true },
+    })
+
     await container.start()
     console.log('Container started')
-    await cleanupNetns()
+    await ensureRuntimeDirs()
 
     // ツールが入っているか確認
     const check = await execInContainer('ip -V')
@@ -131,29 +166,10 @@ export async function startContainer() {
     }
 
     return { success: true }
+  } catch (e) {
+    console.log('startContainer failed:', e.message)
+    return { success: false, error: e.message }
   }
-
-  // コンテナが存在しない → 新規作成
-  const imageName = await buildImage()
-
-  container = await docker.createContainer({
-    Image: imageName,
-    name: CONTAINER_NAME,
-    Cmd: ['sleep', 'infinity'],
-    HostConfig: { Privileged: true },
-  })
-
-  await container.start()
-  console.log('Container started')
-
-  // ツールが入っているか確認
-  const check = await execInContainer('ip -V')
-  if (!check.success) {
-    console.log('Installing tools...')
-    await execInContainer('apt-get update -qq && apt-get install -y -qq iproute2 iputils-ping')
-  }
-
-  return { success: true }
 }
 
 export async function stopContainer() {
@@ -220,13 +236,21 @@ export async function execInContainer(cmd) {
 // ストリーミング実行
 const activeStreams = new Map()
 
+function getPidFilePath(sessionId) {
+  const safeId = String(sessionId ?? 'unknown')
+    .replace(/[^A-Za-z0-9_.-]/g, '_')
+    .slice(0, 120)
+  return `/tmp/netns-viz-pid_${safeId}`
+}
+
 export async function execStreaming(cmd, sessionId, onData) {
   const target = await getLiveContainer()
   if (!target) { onData('[error] Container not running\n__STREAM_END__'); return }
 
   try {
+    const pidFilePath = getPidFilePath(sessionId)
     // コマンドをラップして、PIDファイルに書き出す
-    const wrappedCmd = `bash -c 'echo $$ > /tmp/pid_${sessionId}; ${cmd.replace(/'/g, "'\\''")}'`
+    const wrappedCmd = `bash -c 'mkdir -p /tmp && echo $$ > "${pidFilePath}"; ${cmd.replace(/'/g, "'\\''")}'`
 
     const exec = await target.exec({
       Cmd: ['bash', '-c', wrappedCmd],
@@ -265,9 +289,10 @@ export async function killSession(sessionId) {
   if (!session) return { success: false }
 
   try {
+    const pidFilePath = getPidFilePath(sessionId)
     // コンテナ内のプロセスをkillする
     const killExec = await target.exec({
-      Cmd: ['bash', '-c', `cat /tmp/pid_${sessionId} 2>/dev/null && kill -- -$(cat /tmp/pid_${sessionId}) 2>/dev/null; rm -f /tmp/pid_${sessionId}`],
+      Cmd: ['bash', '-c', `if [ -f "${pidFilePath}" ]; then pid="$(cat "${pidFilePath}" 2>/dev/null)"; [ -n "$pid" ] && kill -- -"${pid}" 2>/dev/null; fi; rm -f "${pidFilePath}"`],
       AttachStdout: true,
       AttachStderr: true,
     })

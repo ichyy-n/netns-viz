@@ -468,8 +468,17 @@ export default function NetnsVisualizer() {
     setDockerLoading(true);
     try {
       const r = await window.electronAPI.docker.start();
-      if (r.success) { setDockerReady(true); addExecLog('docker start', 'Container started'); }
-    } catch (e) { addExecLog('docker start', e.message, false); }
+      if (r.success) {
+        setDockerReady(true);
+        addExecLog('docker start', 'Container started');
+      } else {
+        setDockerReady(false);
+        addExecLog('docker start', r?.error || 'Failed to start container', false);
+      }
+    } catch (e) {
+      setDockerReady(false);
+      addExecLog('docker start', e.message, false);
+    }
     setDockerLoading(false);
   }, [addExecLog]);
 

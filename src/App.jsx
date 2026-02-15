@@ -503,33 +503,49 @@ export default function NetnsVisualizer() {
     return r;
   }, [dockerReady, addExecLog]);
 
-  const fetchMac = useCallback(async (ifaceName, nsName) => {
-    if (!dockerReady) return null;
-    const r = await window.electronAPI.docker.exec(`ip netns exec ${nsName} cat /sys/class/net/${ifaceName}/address 2>/dev/null`);
-    return r.success ? r.output.trim() : null;
+  const fetchIfaceRuntime = useCallback(async (ifaceName, nsName) => {
+    if (!dockerReady) return { ip: "", mac: null };
+    const [ipRes, macRes] = await Promise.all([
+      window.electronAPI.docker.exec(`ip netns exec ${nsName} sh -lc "ip -o -4 addr show dev ${ifaceName} 2>/dev/null | awk '{print \\$4; exit}'"`),
+      window.electronAPI.docker.exec(`ip netns exec ${nsName} cat /sys/class/net/${ifaceName}/address 2>/dev/null`),
+    ]);
+    return {
+      ip: ipRes.success ? (ipRes.output || "").trim() : "",
+      mac: macRes.success ? (macRes.output || "").trim() || null : null,
+    };
   }, [dockerReady]);
 
-  const updateMacs = useCallback(async () => {
-    if (!dockerReady) return;
+  const syncVethRuntime = useCallback(async () => {
+    if (!dockerReady || !veths.length) return;
     const updates = [];
     for (const v of veths) {
-      for (const end of ['endA', 'endB']) {
+      for (const end of ["endA", "endB"]) {
         const ns = namespaces.find(n => n.id === v[end].nsId);
-        if (ns) {
-          const mac = await fetchMac(v[end].name, ns.name);
-          if (mac) updates.push({ vethId: v.id, end, mac });
-        }
+        if (!ns) continue;
+        const runtime = await fetchIfaceRuntime(v[end].name, ns.name);
+        updates.push({ vethId: v.id, end, ...runtime });
       }
     }
-    if (updates.length) {
-      update(s => {
-        updates.forEach(u => {
-          const veth = s.veths.find(vv => vv.id === u.vethId);
-          if (veth) veth[u.end].mac = u.mac;
-        });
+    if (!updates.length) return;
+
+    setState(prev => {
+      const next = JSON.parse(JSON.stringify(prev));
+      updates.forEach(u => {
+        const veth = next.veths.find(vv => vv.id === u.vethId);
+        if (!veth) return;
+        veth[u.end].ip = u.ip;
+        veth[u.end].mac = u.mac;
       });
-    }
-  }, [dockerReady, veths, namespaces, fetchMac, update]);
+      return next;
+    });
+  }, [dockerReady, veths, namespaces, fetchIfaceRuntime]);
+
+  useEffect(() => {
+    if (!dockerReady || !veths.length) return;
+    syncVethRuntime();
+    const timer = setInterval(syncVethRuntime, 2000);
+    return () => clearInterval(timer);
+  }, [dockerReady, veths, syncVethRuntime]);
 
   /* ── Terminal tabs ── */
   const openTerminal = useCallback((ns) => {
@@ -653,32 +669,6 @@ export default function NetnsVisualizer() {
     setState(data);
     setTerminalTabs([]); setActiveTermTab(null); setShowTerminal(false);
 
-    // 読み込み後にMACアドレスを取得
-    if (dockerReady) {
-      setTimeout(async () => {
-        const updates = [];
-        for (const v of data.veths) {
-          for (const end of ['endA', 'endB']) {
-            const ns = data.namespaces.find(n => n.id === v[end].nsId);
-            if (ns) {
-              const r = await window.electronAPI.docker.exec(`ip netns exec ${ns.name} cat /sys/class/net/${v[end].name}/address 2>/dev/null`);
-              if (r.success && r.output.trim()) updates.push({ vethId: v.id, end, mac: r.output.trim() });
-            }
-          }
-        }
-        if (updates.length) {
-          setState(prev => {
-            const next = JSON.parse(JSON.stringify(prev));
-            updates.forEach(u => {
-              const veth = next.veths.find(vv => vv.id === u.vethId);
-              if (veth) veth[u.end].mac = u.mac;
-            });
-            return next;
-          });
-        }
-      }, 1000);
-    }
-    
   }, [dockerReady, namespaces, execAndLog, addExecLog]);
 
   /* ── Drag ── */

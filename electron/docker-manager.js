@@ -226,7 +226,7 @@ export async function execStreaming(cmd, sessionId, onData) {
 
   try {
     // コマンドをラップして、PIDファイルに書き出す
-    const wrappedCmd = `bash -c 'echo $$ > /tmp/pid_${sessionId}; exec ${cmd.replace(/'/g, "'\\''")}'`
+    const wrappedCmd = `bash -c 'echo $$ > /tmp/pid_${sessionId}; ${cmd.replace(/'/g, "'\\''")}'`
 
     const exec = await target.exec({
       Cmd: ['bash', '-c', wrappedCmd],

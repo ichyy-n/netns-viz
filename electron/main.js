@@ -54,7 +54,7 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
+  app.quit()
 })
 
 app.on('activate', () => {
@@ -62,13 +62,13 @@ app.on('activate', () => {
 })
 
 let isQuitting = false
-app.on('before-quit', (e) => {
+app.on('will-quit', (e) => {
   if (isQuitting) return
   e.preventDefault()
   isQuitting = true
   stopContainer()
     .catch((err) => console.error('stopContainer error:', err))
-    .finally(() => app.quit())
+    .finally(() => app.exit(0))
 })
 
 // --- Docker IPC ---

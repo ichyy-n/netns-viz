@@ -11,7 +11,7 @@ const COLORS = {
 const NS_COLORS = ["#3b82f6","#10b981","#f59e0b","#a855f7","#06b6d4","#ef4444","#ec4899","#84cc16"];
 let idCounter = 1;
 const uid = () => `id_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-const defaultState = () => ({ namespaces: [], bridges: [], veths: [], routes: [] });
+const defaultState = () => ({ namespaces: [], bridges: [], veths: [], routes: [], commands: [] });
 const GUI_STATE_KEY = "netns-viz:gui-state:v1";
 
 const loadGuiState = () => {
@@ -24,6 +24,7 @@ const loadGuiState = () => {
     if (!Array.isArray(parsed.namespaces) || !Array.isArray(parsed.bridges) || !Array.isArray(parsed.veths) || !Array.isArray(parsed.routes)) {
       return defaultState();
     }
+    if (!Array.isArray(parsed.commands)) parsed.commands = [];
     return parsed;
   } catch {
     return defaultState();
@@ -461,7 +462,7 @@ export default function NetnsVisualizer() {
   const [macModal, setMacModal] = useState(null);
   const logEndRef = useRef(null);
 
-  const { namespaces, bridges, veths, routes } = state;
+  const { namespaces, bridges, veths, routes, commands } = state;
   const update = useCallback((fn) => setState(prev => { const n = JSON.parse(JSON.stringify(prev)); fn(n); return n; }), []);
   const addExecLog = useCallback((cmd, output, ok = true) => setExecLog(prev => [...prev, { cmd, output, success: ok, time: new Date().toLocaleTimeString() }]), []);
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [execLog]);
@@ -667,9 +668,18 @@ export default function NetnsVisualizer() {
         const dev = rt.iface ? ` dev ${rt.iface}` : "";
         await execAndLog(`ip netns exec ${ns.name} ip route add ${rt.dest} via ${rt.gateway}${dev}`);
       }
+      for (const cmd of (data.commands || [])) {
+        const ns = data.namespaces.find(n => n.id === cmd.nsId);
+        if (!ns) continue;
+        const lines = cmd.cmds.split('\n').filter(l => l.trim());
+        for (const line of lines) {
+          await execAndLog(`ip netns exec ${ns.name} ${line.trim()}`);
+        }
+      }
       addExecLog('load', 'Environment rebuilt ✓');
     }
 
+    if (!Array.isArray(data.commands)) data.commands = [];
     setState(data);
     setTerminalTabs([]); setActiveTermTab(null); setShowTerminal(false);
 
@@ -760,14 +770,24 @@ export default function NetnsVisualizer() {
       const ns = namespaces.find(n => n.id === r.nsId); if (!ns) return;
       c.push(`ip netns exec ${ns.name} ip route add ${r.dest} via ${r.gateway}${r.iface ? ` dev ${r.iface}` : ""}`);
     });
+    if (commands.length) {
+      c.push("", "# === Custom Commands ===");
+      commands.forEach(cmd => {
+        const ns = namespaces.find(n => n.id === cmd.nsId); if (!ns) return;
+        cmd.cmds.split('\n').filter(l => l.trim()).forEach(line => {
+          c.push(`ip netns exec ${ns.name} ${line.trim()}`);
+        });
+      });
+    }
     setCmdLog(c); setShowCmd(true);
-  }, [namespaces, bridges, veths, routes]);
+  }, [namespaces, bridges, veths, routes, commands]);
 
   /* ── Add operations ── */
   const addNs = () => { const i = namespaces.length; setModal({ type: "addNs", data: { name: `ns${i+1}`, color: NS_COLORS[i%NS_COLORS.length] } }); };
   const addBridge = () => setModal({ type: "addBridge", data: { name: `br${bridges.length}`, nsId: namespaces[0]?.id||"", ip: "" } });
   const addVeth = () => { const i = veths.length+1; setModal({ type: "addVeth", data: { name: `veth-pair-${i}`, endAName: `veth${i}a`, endANs: namespaces[0]?.id||"", endAIp: "", endAMac: "", endABridge: "", endBName: `veth${i}b`, endBNs: namespaces[1]?.id||namespaces[0]?.id||"", endBIp: "", endBMac: "", endBBridge: "" } }); };
   const addRoute = () => setModal({ type: "addRoute", data: { nsId: namespaces[0]?.id||"", dest: "", gateway: "", iface: "" } });
+  const addCommand = () => setModal({ type: "addCommand", data: { nsId: namespaces[0]?.id||"", cmds: "" } });
 
   const confirmModal = async () => {
     if (!modal) return;
@@ -812,9 +832,18 @@ export default function NetnsVisualizer() {
         await execAndLog(`ip netns exec ${ns.name} ip route add ${data.dest} via ${data.gateway}${dev}`);
       }
       update(s => s.routes.push({ id: uid(), nsId: data.nsId, dest: data.dest, gateway: data.gateway, iface: data.iface }));
+    } else if (type === "addCommand") {
+      const ns = namespaces.find(n => n.id === data.nsId);
+      if (dockerReady && ns) {
+        const lines = data.cmds.split('\n').filter(l => l.trim());
+        for (const line of lines) {
+          await execAndLog(`ip netns exec ${ns.name} ${line.trim()}`);
+        }
+      }
+      update(s => s.commands.push({ id: uid(), nsId: data.nsId, cmds: data.cmds }));
     }
-    // Fetch actual MACs from Docker
-      if (dockerReady) {
+    // Fetch actual MACs from Docker (addVeth only)
+      if (type === "addVeth" && dockerReady) {
         setTimeout(async () => {
           const nsA = namespaces.find(n => n.id === data.endANs);
           const nsB = namespaces.find(n => n.id === data.endBNs);
@@ -852,6 +881,7 @@ export default function NetnsVisualizer() {
       s.bridges = s.bridges.filter(b => b.nsId !== id);
       s.veths = s.veths.filter(v => v.endA.nsId !== id && v.endB.nsId !== id);
       s.routes = s.routes.filter(r => r.nsId !== id);
+      s.commands = s.commands.filter(c => c.nsId !== id);
     });
     // 該当nsのターミナルを全部閉じる
     setTerminalTabs(prev => {
@@ -876,6 +906,9 @@ export default function NetnsVisualizer() {
   };
 
   const deleteRoute = (id) => update(s => { s.routes = s.routes.filter(r => r.id !== id); });
+
+  const deleteCommand = (id) => update(s => { s.commands = s.commands.filter(c => c.id !== id); });
+
 
   const resetAll = async () => {
     if (dockerReady) for (const ns of namespaces) await execAndLog(`ip netns del ${ns.name}`);
@@ -914,6 +947,7 @@ export default function NetnsVisualizer() {
         <Btn small onClick={addBridge} color={COLORS.green} disabled={!namespaces.length}><Icon d={Icons.plus} size={12} color="#fff" /> Bridge(L2SW)</Btn>
         <Btn small onClick={addVeth} color={COLORS.orange} disabled={!namespaces.length}><Icon d={Icons.plus} size={12} color="#fff" /> Veth Pair</Btn>
         <Btn small onClick={addRoute} color={COLORS.purple} disabled={!namespaces.length}><Icon d={Icons.plus} size={12} color="#fff" /> Route</Btn>
+        <Btn small onClick={addCommand} color={COLORS.cyan} disabled={!namespaces.length}><Icon d={Icons.plus} size={12} color="#fff" /> Command</Btn>
 
         <div style={{ flex: 1 }} />
 
@@ -1166,6 +1200,23 @@ export default function NetnsVisualizer() {
         </Modal>
       )}
 
+      {modal?.type === "addCommand" && (
+        <Modal title="Add Commands" onClose={() => setModal(null)}>
+          <Select label="Namespace" value={modal.data.nsId} onChange={v => setModal({...modal, data:{...modal.data, nsId:v}})} options={nsOptions} />
+          <div style={{ marginBottom: 8 }}>
+            <label style={{ fontSize: 11, color: COLORS.textMuted, display: "block", marginBottom: 4 }}>Commands (1行1コマンド)</label>
+            <textarea value={modal.data.cmds} onChange={e => setModal({...modal, data:{...modal.data, cmds: e.target.value}})}
+              placeholder={"iptables -A FORWARD -j ACCEPT\ntcpdump -i veth1a -w /tmp/cap.pcap"} rows={6}
+              style={{ width: "100%", boxSizing: "border-box", background: COLORS.surface, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: 8, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", resize: "vertical" }} />
+          </div>
+          <div style={{ fontSize: 10, color: COLORS.textDim, marginBottom: 12 }}>※ 各コマンドは ip netns exec NS_NAME を付けて実行されます</div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <Btn ghost small onClick={() => setModal(null)}>キャンセル</Btn>
+            <Btn small color={COLORS.cyan} onClick={confirmModal} disabled={!modal.data.cmds.trim()}>追加</Btn>
+          </div>
+        </Modal>
+      )}
+
       {routeModal && (
         <Modal title={`Routing Table: ${routeModal.nsName}`} onClose={() => setRouteModal(null)} width={500}>
           <pre style={{ background: COLORS.bg, color: COLORS.green, padding: 16, borderRadius: 8, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.7, border: `1px solid ${COLORS.border}`, whiteSpace: "pre-wrap", maxHeight: 300, overflow: "auto" }}>
@@ -1197,6 +1248,23 @@ export default function NetnsVisualizer() {
           <pre style={{ background: COLORS.bg, color: COLORS.green, padding: 16, borderRadius: 8, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.7, overflow: "auto", maxHeight: 400, border: `1px solid ${COLORS.border}`, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
             {cmdLog.join("\n")}
           </pre>
+          {commands.length > 0 && (
+            <div style={{ marginTop: 16, borderTop: `1px solid ${COLORS.border}`, paddingTop: 12 }}>
+              <div style={{ fontSize: 11, color: COLORS.textMuted, marginBottom: 8 }}>カスタムコマンド</div>
+              {commands.map(cmd => {
+                const ns = namespaces.find(n => n.id === cmd.nsId);
+                return (
+                  <div key={cmd.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, padding: "4px 8px", background: COLORS.surface, borderRadius: 4, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
+                    <span style={{ color: ns?.color, fontWeight: 700, flexShrink: 0 }}>{ns?.name || "?"}</span>
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: COLORS.textDim }}>
+                      {cmd.cmds.split('\n').filter(l => l.trim()).join('; ')}
+                    </span>
+                    <span onClick={() => deleteCommand(cmd.id)} style={{ cursor: "pointer", color: COLORS.red, opacity: 0.5, fontSize: 10 }}>✕</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
             <Btn small ghost onClick={() => setShowCmd(false)}>閉じる</Btn>
             <Btn small onClick={() => navigator.clipboard?.writeText(cmdLog.join("\n"))}>📋 コピー</Btn>

@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, powerMonitor } from 'electron'
 import path from 'path'
 import fs from 'fs/promises'
 import { fileURLToPath } from 'url'
-import { startContainer, stopContainer, execInContainer, openShell, sendCommand, closeShell, killSession, writeSession, reconnectContainer } from './docker-manager.js'
+import { startContainer, stopContainer, execInContainer, openShell, sendCommand, closeShell, killSession, writeSession, closeAllShells, reconnectContainer } from './docker-manager.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -30,6 +30,7 @@ app.whenReady().then(createWindow)
 
 app.whenReady().then(() => {
   powerMonitor.on('resume', async () => {
+    closeAllShells()
     try {
       const result = await reconnectContainer()
       const win = BrowserWindow.getAllWindows()[0]

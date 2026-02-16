@@ -380,6 +380,21 @@ export async function writeSession(sessionId, data) {
   }
 }
 
+export function closeAllShells() {
+  for (const [sessionId, session] of activeStreams) {
+    activeStreams.delete(sessionId)
+    try {
+      session.stream.removeAllListeners()
+      session.stream.write('\x03')
+      session.stream.write('exit\n')
+      setTimeout(() => { try { session.stream.destroy() } catch (e) {} }, 300)
+    } catch (e) {}
+    if (session.onData) {
+      session.onData('\n[スリープにより終了]\n__SHELL_EXIT__')
+    }
+  }
+}
+
 export async function reconnectContainer() {
   const maxAttempts = 6
   let lastError = 'Reconnect failed'

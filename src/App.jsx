@@ -486,11 +486,15 @@ export default function NetnsVisualizer() {
     if (!isElectron() || !window.electronAPI.status?.onDockerStatus) return;
     return window.electronAPI.status.onDockerStatus((payload) => {
       if (payload?.source !== 'resume') return;
+      // まずdockerReadyをfalseにして全ターミナルのuseEffectクリーンアップを発火
+      setDockerReady(false);
       if (payload?.ok) {
-        setDockerReady(true);
-        addExecLog('docker resume', payload?.restarted ? 'Container restarted after sleep' : 'Reconnected after sleep');
+        // 次tickでtrueに戻し、シェルを再オープン
+        setTimeout(() => {
+          setDockerReady(true);
+          addExecLog('docker resume', payload?.restarted ? 'Container restarted after sleep' : 'Reconnected after sleep');
+        }, 100);
       } else {
-        setDockerReady(false);
         addExecLog('docker resume', payload?.error || 'Reconnect failed', false);
       }
     });

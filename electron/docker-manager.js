@@ -260,17 +260,11 @@ export async function openShell(sessionId, shellCmd, onData) {
       const markerIdx = strippedBuf.indexOf(session.markerPending)
       if (markerIdx !== -1) {
         // マーカー検出 → コマンド完了
-        const marker = session.markerPending
         let output = strippedBuf.substring(0, markerIdx).replace(/\n+$/, '')
-        // コマンドエコーとechoマーカーコマンドを除去（readline無効化が効かなかった場合のフォールバック）
+        // コマンドエコーを除去（stty -echoが効かなかった場合のフォールバック）
         if (session.sentCmd) {
           const lines = output.split('\n')
-          // 先頭のコマンドエコーを除去
           if (lines.length && lines[0].trim() === session.sentCmd.trim()) lines.shift()
-          // echo marker コマンドのエコーを除去
-          const echoLine = `echo '${marker}'`
-          const echoIdx = lines.findIndex(l => l.trim() === echoLine)
-          if (echoIdx !== -1) lines.splice(echoIdx, 1)
           output = lines.join('\n').replace(/^\n+|\n+$/g, '')
         }
         if (output) onData(output)
@@ -281,7 +275,7 @@ export async function openShell(sessionId, shellCmd, onData) {
       } else {
         // マーカー未検出 → マーカー行以外の完全な行をフラッシュ
         const lines = strippedBuf.split('\n')
-        const markerPrefix = '__NSVIZ_DONE_'
+        const markerPrefix = '__NSVIZ_PROMPT__'
         let flushUpTo = 0
         // 最後の要素は未完成行の可能性があるので除外（i < length - 1）
         for (let i = 0; i < lines.length - 1; i++) {
@@ -305,8 +299,8 @@ export async function openShell(sessionId, shellCmd, onData) {
       onData(`\n[error] ${err.message}\n__SHELL_EXIT__`)
     })
 
-    // TTYエコーとプロンプトを抑制
-    stream.write("stty -echo\nPS1=''\nPS2=''\n")
+    // TTYエコーとプロンプトを抑制。PROMPT_COMMANDでコマンド完了を検知
+    stream.write("stty -echo\nPS1=''\nPS2=''\nPROMPT_COMMAND=\"echo '__NSVIZ_PROMPT__'\"\n")
   } catch (e) {
     onData(`[error] ${e.message}\n__SHELL_EXIT__`)
   }
@@ -316,15 +310,14 @@ export async function sendCommand(sessionId, cmd) {
   const session = activeStreams.get(sessionId)
   if (!session || !session.stream) return { success: false, error: 'Session not found' }
 
-  const marker = `__NSVIZ_DONE_${Date.now()}_${Math.random().toString(36).slice(2, 8)}__`
-  session.markerPending = marker
+  session.markerPending = '__NSVIZ_PROMPT__'
   session.sentCmd = cmd
   session.buffer = ''
 
   try {
-    // コマンドとマーカーechoを2行に分けて書き込む
-    // Ctrl+Cでcmdが中断されてもechoが実行される
-    session.stream.write(`${cmd}\necho '${marker}'\n`)
+    // コマンドのみ送信。完了検知はPROMPT_COMMANDが出力する__NSVIZ_PROMPT__で行う
+    // （echo markerをstdinに流すとnc/cat等のstdin読み取りコマンドに混入するため）
+    session.stream.write(`${cmd}\n`)
     return { success: true }
   } catch (e) {
     return { success: false, error: e.message }

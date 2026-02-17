@@ -18,7 +18,7 @@ function createWindow() {
     }
   })
 
-  if (process.env.NODE_ENV === 'development') {
+  if (!app.isPackaged) {
     win.loadURL('http://localhost:5173')
     win.webContents.openDevTools()
   } else {

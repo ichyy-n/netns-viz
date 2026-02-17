@@ -2,6 +2,7 @@ import Docker from 'dockerode'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import fs from 'fs'
+import { app } from 'electron'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -51,7 +52,9 @@ async function getLiveContainer() {
 }
 
 async function buildImage() {
-  const dockerfilePath = path.join(__dirname, '..', 'docker')
+  const dockerfilePath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'docker')
+    : path.join(__dirname, '..', 'docker')
 
   // Dockerfileがあるか確認
   if (!fs.existsSync(path.join(dockerfilePath, 'Dockerfile'))) {

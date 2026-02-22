@@ -6,12 +6,13 @@ const COLORS = {
   accent: "#3b82f6", green: "#10b981", greenGlow: "rgba(16,185,129,0.15)",
   orange: "#f59e0b", orangeGlow: "rgba(245,158,11,0.15)",
   red: "#ef4444", purple: "#a855f7", cyan: "#06b6d4",
+  cyanGlow: "rgba(6,182,212,0.15)",
 };
 
 const NS_COLORS = ["#3b82f6","#10b981","#f59e0b","#a855f7","#06b6d4","#ef4444","#ec4899","#84cc16"];
 let idCounter = 1;
 const uid = () => `id_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-const defaultState = () => ({ namespaces: [], bridges: [], veths: [], routes: [], commands: [] });
+const defaultState = () => ({ namespaces: [], bridges: [], veths: [], vlans: [], routes: [], commands: [] });
 const GUI_STATE_KEY = "netns-viz:gui-state:v1";
 
 const loadGuiState = () => {
@@ -25,6 +26,7 @@ const loadGuiState = () => {
       return defaultState();
     }
     if (!Array.isArray(parsed.commands)) parsed.commands = [];
+    if (!Array.isArray(parsed.vlans)) parsed.vlans = [];
     return parsed;
   } catch {
     return defaultState();
@@ -411,14 +413,15 @@ const HostTerminal = ({ tabId, dockerReady }) => {
 /* ── Canvas helpers ── */
 const NS_W = 380, NS_HEADER = 44, NS_ITEM_H = 44;
 
-function getNsHeight(ns, bridges, veths) {
+function getNsHeight(ns, bridges, veths, vlans = []) {
   let items = 0;
   bridges.filter(b => b.nsId === ns.id).forEach(() => items++);
   veths.forEach(v => { if (v.endA.nsId === ns.id) items++; if (v.endB.nsId === ns.id) items++; });
+  vlans.filter(vl => vl.nsId === ns.id).forEach(() => items++);
   return NS_HEADER + Math.max(items, 1) * NS_ITEM_H + 16;
 }
 
-function getInterfacePositions(namespaces, bridges, veths) {
+function getInterfacePositions(namespaces, bridges, veths, vlans = []) {
   const pos = {};
   namespaces.forEach(ns => {
     let idx = 0;
@@ -428,6 +431,9 @@ function getInterfacePositions(namespaces, bridges, veths) {
     veths.forEach(v => {
       if (v.endA.nsId === ns.id) { pos[v.endA.id] = { x: ns.x + NS_W, y: ns.y + NS_HEADER + idx * NS_ITEM_H + NS_ITEM_H / 2, side: "right" }; idx++; }
       if (v.endB.nsId === ns.id) { pos[v.endB.id] = { x: ns.x, y: ns.y + NS_HEADER + idx * NS_ITEM_H + NS_ITEM_H / 2, side: "left" }; idx++; }
+    });
+    vlans.filter(vl => vl.nsId === ns.id).forEach(vl => {
+      pos[vl.id] = { x: ns.x + NS_W, y: ns.y + NS_HEADER + idx * NS_ITEM_H + NS_ITEM_H / 2, side: "right" }; idx++;
     });
   });
   return pos;
@@ -459,10 +465,11 @@ export default function NetnsVisualizer() {
   const [execLog, setExecLog] = useState([]);
   const [showLog, setShowLog] = useState(false);
   const [routeModal, setRouteModal] = useState(null);
-  const [macModal, setMacModal] = useState(null);
+  const [ifaceModal, setIfaceModal] = useState(null);
+  const [vlanModal, setVlanModal] = useState(null);
   const logEndRef = useRef(null);
 
-  const { namespaces, bridges, veths, routes, commands } = state;
+  const { namespaces, bridges, veths, vlans, routes, commands } = state;
   const update = useCallback((fn) => setState(prev => { const n = JSON.parse(JSON.stringify(prev)); fn(n); return n; }), []);
   const addExecLog = useCallback((cmd, output, ok = true) => setExecLog(prev => [...prev, { cmd, output, success: ok, time: new Date().toLocaleTimeString() }]), []);
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [execLog]);
@@ -599,23 +606,66 @@ export default function NetnsVisualizer() {
     setRouteModal({ nsId: ns.id, nsName: ns.name, nsColor: ns.color, routes: r.success ? r.output : 'Failed to fetch routes' });
   }, [dockerReady]);
 
-  const openMacModal = useCallback((vethId, end, ifaceName, nsName, currentMac) => {
-    setMacModal({ vethId, end, ifaceName, nsName, currentMac: currentMac || '', newMac: '' });
+  const openIfaceModal = useCallback((vethId, end, ifaceName, nsName, currentIp, currentMac) => {
+    setIfaceModal({ vethId, end, ifaceName, nsName, currentIp: currentIp || '', currentMac: currentMac || '', newIp: '', newMac: '' });
   }, []);
 
-  const changeMac = useCallback(async () => {
-    if (!macModal || !macModal.newMac) return;
-    await execAndLog(`ip netns exec ${macModal.nsName} ip link set ${macModal.ifaceName} down`);
-    const r = await execAndLog(`ip netns exec ${macModal.nsName} ip link set dev ${macModal.ifaceName} address ${macModal.newMac}`);
-    await execAndLog(`ip netns exec ${macModal.nsName} ip link set ${macModal.ifaceName} up`);
-    if (r.success) {
-      update(s => {
-        const v = s.veths.find(vv => vv.id === macModal.vethId);
-        if (v) v[macModal.end].mac = macModal.newMac;
-      });
+  const changeIface = useCallback(async () => {
+    if (!ifaceModal) return;
+    const { nsName, ifaceName, newIp, newMac, vethId, end } = ifaceModal;
+    if (newMac && dockerReady) {
+      await execAndLog(`ip netns exec ${nsName} ip link set ${ifaceName} down`);
+      await execAndLog(`ip netns exec ${nsName} ip link set dev ${ifaceName} address ${newMac}`);
+      await execAndLog(`ip netns exec ${nsName} ip link set ${ifaceName} up`);
     }
-    setMacModal(null);
-  }, [macModal, execAndLog, update]);
+    if (newIp && dockerReady) {
+      if (ifaceModal.currentIp) {
+        await execAndLog(`ip netns exec ${nsName} ip addr del ${ifaceModal.currentIp} dev ${ifaceName}`);
+      }
+      await execAndLog(`ip netns exec ${nsName} ip addr add ${newIp} dev ${ifaceName}`);
+    }
+    update(s => {
+      const v = s.veths.find(vv => vv.id === vethId);
+      if (!v) return;
+      if (newMac) v[end].mac = newMac;
+      if (newIp) v[end].ip = newIp;
+    });
+    setIfaceModal(null);
+  }, [ifaceModal, dockerReady, execAndLog, update]);
+
+  const openVlanModal = useCallback((parentType, parentId, parentEnd, ifaceName, nsId) => {
+    setVlanModal({ parentType, parentId, parentEnd, ifaceName, nsId, vlanId: '', ip: '' });
+  }, []);
+
+  const confirmVlan = useCallback(async () => {
+    if (!vlanModal || !vlanModal.vlanId) return;
+    const vid = parseInt(vlanModal.vlanId, 10);
+    if (isNaN(vid) || vid < 1 || vid > 4094) { alert('VLAN ID は 1〜4094 の範囲で指定してください'); return; }
+    const ns = namespaces.find(n => n.id === vlanModal.nsId);
+    if (!ns) return;
+    const vlanName = `${vlanModal.ifaceName}.${vid}`;
+    const p = `ip netns exec ${ns.name}`;
+    if (dockerReady) {
+      let r = await execAndLog(`${p} ip link add link ${vlanModal.ifaceName} name ${vlanName} type vlan id ${vid}`);
+      if (!r.success) { alert(`Failed: ${r.output}`); return; }
+      await execAndLog(`${p} ip link set ${vlanName} up`);
+      if (vlanModal.ip) await execAndLog(`${p} ip addr add ${vlanModal.ip} dev ${vlanName}`);
+    }
+    update(s => {
+      if (!s.vlans) s.vlans = [];
+      s.vlans.push({ id: uid(), parentType: vlanModal.parentType, parentId: vlanModal.parentId, parentEnd: vlanModal.parentEnd, vlanId: vid, name: vlanName, ip: vlanModal.ip, nsId: vlanModal.nsId });
+    });
+    setVlanModal(null);
+  }, [vlanModal, namespaces, dockerReady, execAndLog, update]);
+
+  const deleteVlan = useCallback(async (id) => {
+    const vl = vlans.find(v => v.id === id);
+    if (dockerReady && vl) {
+      const ns = namespaces.find(n => n.id === vl.nsId);
+      if (ns) await execAndLog(`ip netns exec ${ns.name} ip link del ${vl.name}`);
+    }
+    update(s => { s.vlans = s.vlans.filter(v => v.id !== id); });
+  }, [vlans, namespaces, dockerReady, execAndLog, update]);
 
   /* ── Save / Load ── */
   const saveTopology = useCallback(async () => {
@@ -668,6 +718,15 @@ export default function NetnsVisualizer() {
         const dev = rt.iface ? ` dev ${rt.iface}` : "";
         await execAndLog(`ip netns exec ${ns.name} ip route add ${rt.dest} via ${rt.gateway}${dev}`);
       }
+      for (const vl of (data.vlans || [])) {
+        const ns = data.namespaces.find(n => n.id === vl.nsId);
+        if (!ns) continue;
+        const p = `ip netns exec ${ns.name}`;
+        const parentName = vl.name.replace(`.${vl.vlanId}`, '');
+        await execAndLog(`${p} ip link add link ${parentName} name ${vl.name} type vlan id ${vl.vlanId}`);
+        await execAndLog(`${p} ip link set ${vl.name} up`);
+        if (vl.ip) await execAndLog(`${p} ip addr add ${vl.ip} dev ${vl.name}`);
+      }
       for (const cmd of (data.commands || [])) {
         const ns = data.namespaces.find(n => n.id === cmd.nsId);
         if (!ns) continue;
@@ -680,6 +739,7 @@ export default function NetnsVisualizer() {
     }
 
     if (!Array.isArray(data.commands)) data.commands = [];
+    if (!Array.isArray(data.vlans)) data.vlans = [];
     setState(data);
     setTerminalTabs([]); setActiveTermTab(null); setShowTerminal(false);
 
@@ -760,12 +820,25 @@ export default function NetnsVisualizer() {
       if (nsB) c.push(`ip link set ${v.endB.name} netns ${nsB.name}`);
       const pA = nsA ? `ip netns exec ${nsA.name} ` : "", pB = nsB ? `ip netns exec ${nsB.name} ` : "";
       if (v.endA.bridge) { const br = bridges.find(b => b.id === v.endA.bridge); if (br) c.push(`${pA}ip link set ${v.endA.name} master ${br.name}`); }
+      if (v.endA.mac) c.push(`${pA}ip link set dev ${v.endA.name} address ${v.endA.mac}`);
       if (v.endA.ip) c.push(`${pA}ip addr add ${v.endA.ip} dev ${v.endA.name}`);
       c.push(`${pA}ip link set ${v.endA.name} up`);
       if (v.endB.bridge) { const br = bridges.find(b => b.id === v.endB.bridge); if (br) c.push(`${pB}ip link set ${v.endB.name} master ${br.name}`); }
+      if (v.endB.mac) c.push(`${pB}ip link set dev ${v.endB.name} address ${v.endB.mac}`);
       if (v.endB.ip) c.push(`${pB}ip addr add ${v.endB.ip} dev ${v.endB.name}`);
       c.push(`${pB}ip link set ${v.endB.name} up`, "");
     });
+    if (vlans.length) {
+      c.push("# --- VLANs ---");
+      vlans.forEach(vl => {
+        const ns = namespaces.find(n => n.id === vl.nsId); if (!ns) return;
+        const p = `ip netns exec ${ns.name} `;
+        c.push(`${p}ip link add link ${vl.name.replace(`.${vl.vlanId}`, '')} name ${vl.name} type vlan id ${vl.vlanId}`);
+        c.push(`${p}ip link set ${vl.name} up`);
+        if (vl.ip) c.push(`${p}ip addr add ${vl.ip} dev ${vl.name}`);
+        c.push("");
+      });
+    }
     routes.forEach(r => {
       const ns = namespaces.find(n => n.id === r.nsId); if (!ns) return;
       c.push(`ip netns exec ${ns.name} ip route add ${r.dest} via ${r.gateway}${r.iface ? ` dev ${r.iface}` : ""}`);
@@ -780,7 +853,7 @@ export default function NetnsVisualizer() {
       });
     }
     setCmdLog(c); setShowCmd(true);
-  }, [namespaces, bridges, veths, routes, commands]);
+  }, [namespaces, bridges, veths, vlans, routes, commands]);
 
   /* ── Add operations ── */
   const addNs = () => { const i = namespaces.length; setModal({ type: "addNs", data: { name: `ns${i+1}`, color: NS_COLORS[i%NS_COLORS.length] } }); };
@@ -880,6 +953,7 @@ export default function NetnsVisualizer() {
       s.namespaces = s.namespaces.filter(n => n.id !== id);
       s.bridges = s.bridges.filter(b => b.nsId !== id);
       s.veths = s.veths.filter(v => v.endA.nsId !== id && v.endB.nsId !== id);
+      s.vlans = s.vlans.filter(vl => vl.nsId !== id);
       s.routes = s.routes.filter(r => r.nsId !== id);
       s.commands = s.commands.filter(c => c.nsId !== id);
     });
@@ -896,13 +970,13 @@ export default function NetnsVisualizer() {
   const deleteBridge = async (id) => {
     const br = bridges.find(b => b.id === id);
     if (dockerReady && br) { const ns = namespaces.find(n => n.id === br.nsId); if (ns) await execAndLog(`ip netns exec ${ns.name} ip link del ${br.name}`); }
-    update(s => { s.bridges = s.bridges.filter(b => b.id !== id); s.veths.forEach(v => { if (v.endA.bridge === id) v.endA.bridge = null; if (v.endB.bridge === id) v.endB.bridge = null; }); });
+    update(s => { s.bridges = s.bridges.filter(b => b.id !== id); s.veths.forEach(v => { if (v.endA.bridge === id) v.endA.bridge = null; if (v.endB.bridge === id) v.endB.bridge = null; }); s.vlans = s.vlans.filter(vl => !(vl.parentType === 'bridge' && vl.parentId === id)); });
   };
 
   const deleteVeth = async (id) => {
     const v = veths.find(vv => vv.id === id);
     if (dockerReady && v) { const ns = namespaces.find(n => n.id === v.endA.nsId); if (ns) await execAndLog(`ip netns exec ${ns.name} ip link del ${v.endA.name}`); }
-    update(s => { s.veths = s.veths.filter(v => v.id !== id); });
+    update(s => { s.veths = s.veths.filter(v => v.id !== id); s.vlans = s.vlans.filter(vl => !(vl.parentType === 'veth' && vl.parentId === id)); });
   };
 
   const deleteRoute = (id) => update(s => { s.routes = s.routes.filter(r => r.id !== id); });
@@ -915,7 +989,7 @@ export default function NetnsVisualizer() {
     setState(defaultState()); setSelected(null); setTerminalTabs([]); setActiveTermTab(null); setShowTerminal(false); setExecLog([]);
   };
 
-  const ifacePos = getInterfacePositions(namespaces, bridges, veths);
+  const ifacePos = getInterfacePositions(namespaces, bridges, veths, vlans);
   const nsOptions = namespaces.map(n => ({ value: n.id, label: n.name }));
   const bridgeOptions = nsId => [{ value: "", label: "(none)" }, ...bridges.filter(b => b.nsId === nsId).map(b => ({ value: b.id, label: b.name }))];
 
@@ -990,7 +1064,7 @@ export default function NetnsVisualizer() {
 
                 {/* Namespace boxes */}
                 {namespaces.map(ns => {
-                  const h = getNsHeight(ns, bridges, veths);
+                  const h = getNsHeight(ns, bridges, veths, vlans);
                   const isSel = selected === ns.id;
                   return (
                     <g key={ns.id} onMouseDown={e => onMouseDown(e, ns.id)} style={{ cursor: "move" }}>
@@ -1032,7 +1106,11 @@ export default function NetnsVisualizer() {
                           items.push(<g key={b.id}>
                             <rect x={ns.x+8} y={y+4} width={NS_W-16} height={NS_ITEM_H-6} rx={4} fill={COLORS.greenGlow} />
                             <text x={ns.x+20} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" fontSize={11} fill={COLORS.green} fontFamily="'JetBrains Mono', monospace" fontWeight="600">🌉 {b.name}</text>
-                            {b.ip && <text x={ns.x+NS_W-50} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" textAnchor="end" fontSize={10} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace">{b.ip}</text>}
+                            {b.ip && <text x={ns.x+NS_W-70} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" textAnchor="end" fontSize={10} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace">{b.ip}</text>}
+                            {dockerReady && <g onClick={e => { e.stopPropagation(); openVlanModal('bridge', b.id, null, b.name, ns.id); }} style={{ cursor: "pointer" }}>
+                              <rect x={ns.x+NS_W-52} y={y+NS_ITEM_H/2-8} width={18} height={16} rx={3} fill={COLORS.cyan+"30"} />
+                              <text x={ns.x+NS_W-43} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" textAnchor="middle" fontSize={9} fill={COLORS.cyan} fontFamily="'JetBrains Mono', monospace" fontWeight="700">V</text>
+                            </g>}
                             <g onClick={e => { e.stopPropagation(); deleteBridge(b.id); }} style={{ cursor: "pointer" }}><text x={ns.x+NS_W-24} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" fontSize={10} fill={COLORS.red} style={{ opacity: 0.5 }}>✕</text></g>
                           </g>); idx++;
                         });
@@ -1041,22 +1119,41 @@ export default function NetnsVisualizer() {
                             const y = ns.y + NS_HEADER + idx * NS_ITEM_H;
                             const brName = v[end].bridge ? bridges.find(b => b.id === v[end].bridge)?.name : null;
                             items.push(<g key={v[end].id}>
-                              <rect x={ns.x+8} y={y+4} width={NS_W-16} height={NS_ITEM_H-6} rx={4} fill={COLORS.orangeGlow} />
-                              <text x={ns.x+20} y={y+16} dominantBaseline="middle" fontSize={11} fill={COLORS.orange} fontFamily="'JetBrains Mono', monospace" fontWeight="600">🔗 {v[end].name}</text>
-                              <text x={ns.x+NS_W-50} y={y+16} dominantBaseline="middle" textAnchor="end" fontSize={10} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace">
+                              <rect x={ns.x+8} y={y+4} width={NS_W-16} height={NS_ITEM_H-6} rx={4} fill={COLORS.orangeGlow}
+                                onClick={e => { e.stopPropagation(); const nsObj = namespaces.find(n => n.id === v[end].nsId); if (dockerReady && nsObj) openIfaceModal(v.id, end, v[end].name, nsObj.name, v[end].ip, v[end].mac); }}
+                                style={{ cursor: dockerReady ? "pointer" : "default" }} />
+                              <text x={ns.x+20} y={y+16} dominantBaseline="middle" fontSize={11} fill={COLORS.orange} fontFamily="'JetBrains Mono', monospace" fontWeight="600"
+                                onClick={e => { e.stopPropagation(); const nsObj = namespaces.find(n => n.id === v[end].nsId); if (dockerReady && nsObj) openIfaceModal(v.id, end, v[end].name, nsObj.name, v[end].ip, v[end].mac); }}
+                                style={{ cursor: dockerReady ? "pointer" : "default" }}>🔗 {v[end].name}</text>
+                              <text x={ns.x+NS_W-50} y={y+16} dominantBaseline="middle" textAnchor="end" fontSize={10} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace"
+                                onClick={e => { e.stopPropagation(); const nsObj = namespaces.find(n => n.id === v[end].nsId); if (dockerReady && nsObj) openIfaceModal(v.id, end, v[end].name, nsObj.name, v[end].ip, v[end].mac); }}
+                                style={{ cursor: dockerReady ? "pointer" : "default" }}>
                                 {v[end].ip||""}{brName ? ` → ${brName}` : ""}
                               </text>
                               {v[end].mac && (
                                 <text x={ns.x+NS_W-50} y={y+30} dominantBaseline="middle" textAnchor="end" fontSize={10} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace"
-                                  onClick={e => { e.stopPropagation(); const nsObj = namespaces.find(n => n.id === v[end].nsId); if (dockerReady && nsObj) openMacModal(v.id, end, v[end].name, nsObj.name, v[end].mac); }}
+                                  onClick={e => { e.stopPropagation(); const nsObj = namespaces.find(n => n.id === v[end].nsId); if (dockerReady && nsObj) openIfaceModal(v.id, end, v[end].name, nsObj.name, v[end].ip, v[end].mac); }}
                                   style={{ cursor: dockerReady ? "pointer" : "default" }}>
                                   {v[end].mac}
                                 </text>
                               )}
+                              {dockerReady && <g onClick={e => { e.stopPropagation(); openVlanModal('veth', v.id, end, v[end].name, ns.id); }} style={{ cursor: "pointer" }}>
+                                <rect x={ns.x+20} y={y+25} width={18} height={14} rx={3} fill={ns.color+"30"} />
+                                <text x={ns.x+29} y={y+33} dominantBaseline="middle" textAnchor="middle" fontSize={9} fill={ns.color} fontFamily="'JetBrains Mono', monospace" fontWeight="700">V</text>
+                              </g>}
                               <g onClick={e => { e.stopPropagation(); deleteVeth(v.id); }} style={{ cursor: "pointer" }}><text x={ns.x+NS_W-24} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" fontSize={10} fill={COLORS.red} style={{ opacity: 0.5 }}>✕</text></g>
                             </g>); idx++;
                           }
                         }); });
+                        vlans.filter(vl => vl.nsId === ns.id).forEach(vl => {
+                          const y = ns.y + NS_HEADER + idx * NS_ITEM_H;
+                          items.push(<g key={vl.id}>
+                            <rect x={ns.x+8} y={y+4} width={NS_W-16} height={NS_ITEM_H-6} rx={4} fill={COLORS.cyanGlow} />
+                            <text x={ns.x+20} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" fontSize={11} fill={COLORS.cyan} fontFamily="'JetBrains Mono', monospace" fontWeight="600">🏷 {vl.name}</text>
+                            {vl.ip && <text x={ns.x+NS_W-50} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" textAnchor="end" fontSize={10} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace">{vl.ip}</text>}
+                            <g onClick={e => { e.stopPropagation(); deleteVlan(vl.id); }} style={{ cursor: "pointer" }}><text x={ns.x+NS_W-24} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" fontSize={10} fill={COLORS.red} style={{ opacity: 0.5 }}>✕</text></g>
+                          </g>); idx++;
+                        });
                         return items;
                       })()}
                     </g>);
@@ -1229,16 +1326,35 @@ export default function NetnsVisualizer() {
         </Modal>
       )}
 
-      {macModal && (
-        <Modal title={`MAC Address: ${macModal.ifaceName}`} onClose={() => setMacModal(null)} width={400}>
+      {ifaceModal && (
+        <Modal title={`インターフェース設定: ${ifaceModal.ifaceName}`} onClose={() => setIfaceModal(null)} width={420}>
           <div style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 12, fontFamily: "'JetBrains Mono', monospace" }}>
-            現在: <span style={{ color: COLORS.text }}>{macModal.currentMac || '(未取得)'}</span>
+            現在のIP: <span style={{ color: COLORS.text }}>{ifaceModal.currentIp || '(未設定)'}</span>
           </div>
-          <Input label="新しいMACアドレス" value={macModal.newMac} onChange={v => setMacModal({...macModal, newMac: v})} mono placeholder="aa:bb:cc:dd:ee:ff" />
-          <div style={{ fontSize: 10, color: COLORS.textDim, marginBottom: 12 }}>※ インターフェースを一時的にdownしてから変更します</div>
+          <Input label="新しいIPアドレス (CIDR)" value={ifaceModal.newIp} onChange={v => setIfaceModal({...ifaceModal, newIp: v})} mono placeholder="192.168.1.1/24" />
+          <div style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 12, fontFamily: "'JetBrains Mono', monospace" }}>
+            現在のMAC: <span style={{ color: COLORS.text }}>{ifaceModal.currentMac || '(未取得)'}</span>
+          </div>
+          <Input label="新しいMACアドレス" value={ifaceModal.newMac} onChange={v => setIfaceModal({...ifaceModal, newMac: v})} mono placeholder="aa:bb:cc:dd:ee:ff" />
+          <div style={{ fontSize: 10, color: COLORS.textDim, marginBottom: 12 }}>※ MAC変更時はインターフェースを一時的にdownします</div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <Btn ghost small onClick={() => setMacModal(null)}>キャンセル</Btn>
-            <Btn small color={COLORS.orange} onClick={changeMac} disabled={!macModal.newMac}>変更</Btn>
+            <Btn ghost small onClick={() => setIfaceModal(null)}>キャンセル</Btn>
+            <Btn small color={COLORS.orange} onClick={changeIface} disabled={!ifaceModal.newIp && !ifaceModal.newMac}>変更</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {vlanModal && (
+        <Modal title={`タグVLAN追加: ${vlanModal.ifaceName}`} onClose={() => setVlanModal(null)} width={400}>
+          <div style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 12, fontFamily: "'JetBrains Mono', monospace" }}>
+            親インターフェース: <span style={{ color: COLORS.text }}>{vlanModal.ifaceName}</span>
+          </div>
+          <Input label="VLAN ID (1-4094)" value={vlanModal.vlanId} onChange={v => setVlanModal({...vlanModal, vlanId: v})} mono placeholder="100" />
+          <Input label="IP Address (任意)" value={vlanModal.ip} onChange={v => setVlanModal({...vlanModal, ip: v})} mono placeholder="10.0.100.1/24" />
+          <div style={{ fontSize: 10, color: COLORS.textDim, marginBottom: 12 }}>※ {vlanModal.ifaceName}.{vlanModal.vlanId || 'ID'} というサブインターフェースが作成されます</div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <Btn ghost small onClick={() => setVlanModal(null)}>キャンセル</Btn>
+            <Btn small color={COLORS.cyan} onClick={confirmVlan} disabled={!vlanModal.vlanId}>追加</Btn>
           </div>
         </Modal>
       )}

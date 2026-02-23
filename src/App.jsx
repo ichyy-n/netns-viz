@@ -12,7 +12,7 @@ const COLORS = {
 const NS_COLORS = ["#3b82f6","#10b981","#f59e0b","#a855f7","#06b6d4","#ef4444","#ec4899","#84cc16"];
 let idCounter = 1;
 const uid = () => `id_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-const defaultState = () => ({ namespaces: [], bridges: [], veths: [], vlans: [], routes: [], commands: [] });
+const defaultState = () => ({ namespaces: [], bridges: [], veths: [], vlans: [], bridgeVlans: [], routes: [], commands: [] });
 const GUI_STATE_KEY = "netns-viz:gui-state:v1";
 
 const loadGuiState = () => {
@@ -467,9 +467,10 @@ export default function NetnsVisualizer() {
   const [routeModal, setRouteModal] = useState(null);
   const [ifaceModal, setIfaceModal] = useState(null);
   const [vlanModal, setVlanModal] = useState(null);
+  const [bridgeVlanModal, setBridgeVlanModal] = useState(null);
   const logEndRef = useRef(null);
 
-  const { namespaces, bridges, veths, vlans, routes, commands } = state;
+  const { namespaces, bridges, veths, vlans, bridgeVlans, routes, commands } = state;
   const update = useCallback((fn) => setState(prev => { const n = JSON.parse(JSON.stringify(prev)); fn(n); return n; }), []);
   const addExecLog = useCallback((cmd, output, ok = true) => setExecLog(prev => [...prev, { cmd, output, success: ok, time: new Date().toLocaleTimeString() }]), []);
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [execLog]);
@@ -610,6 +611,19 @@ export default function NetnsVisualizer() {
     setIfaceModal({ vethId, end, ifaceName, nsName, currentIp: currentIp || '', currentMac: currentMac || '', newIp: '', newMac: '' });
   }, []);
 
+  const deleteIfaceIp = useCallback(async () => {
+    if (!ifaceModal || !ifaceModal.currentIp) return;
+    const { nsName, ifaceName, currentIp, vethId, end } = ifaceModal;
+    if (dockerReady) {
+      await execAndLog(`ip netns exec ${nsName} ip addr del ${currentIp} dev ${ifaceName}`);
+    }
+    update(s => {
+      const v = s.veths.find(vv => vv.id === vethId);
+      if (v) v[end].ip = "";
+    });
+    setIfaceModal(null);
+  }, [ifaceModal, dockerReady, execAndLog, update]);
+
   const changeIface = useCallback(async () => {
     if (!ifaceModal) return;
     const { nsName, ifaceName, newIp, newMac, vethId, end } = ifaceModal;
@@ -633,8 +647,8 @@ export default function NetnsVisualizer() {
     setIfaceModal(null);
   }, [ifaceModal, dockerReady, execAndLog, update]);
 
-  const openVlanModal = useCallback((parentType, parentId, parentEnd, ifaceName, nsId) => {
-    setVlanModal({ parentType, parentId, parentEnd, ifaceName, nsId, vlanId: '', ip: '' });
+  const openVlanModal = useCallback((parentType, parentId, parentEnd, ifaceName, nsId, parentIp) => {
+    setVlanModal({ parentType, parentId, parentEnd, ifaceName, nsId, vlanId: '', ip: '', parentIp: parentIp || '', removeParentIp: false });
   }, []);
 
   const confirmVlan = useCallback(async () => {
@@ -651,9 +665,23 @@ export default function NetnsVisualizer() {
       await execAndLog(`${p} ip link set ${vlanName} up`);
       if (vlanModal.ip) await execAndLog(`${p} ip addr add ${vlanModal.ip} dev ${vlanName}`);
     }
+    if (vlanModal.removeParentIp && vlanModal.parentIp) {
+      if (dockerReady) {
+        await execAndLog(`${p} ip addr del ${vlanModal.parentIp} dev ${vlanModal.ifaceName}`);
+      }
+    }
     update(s => {
       if (!s.vlans) s.vlans = [];
       s.vlans.push({ id: uid(), parentType: vlanModal.parentType, parentId: vlanModal.parentId, parentEnd: vlanModal.parentEnd, vlanId: vid, name: vlanName, ip: vlanModal.ip, nsId: vlanModal.nsId });
+      if (vlanModal.removeParentIp && vlanModal.parentIp) {
+        if (vlanModal.parentType === 'veth') {
+          const v = s.veths.find(vv => vv.id === vlanModal.parentId);
+          if (v && vlanModal.parentEnd) v[vlanModal.parentEnd].ip = "";
+        } else if (vlanModal.parentType === 'bridge') {
+          const b = s.bridges.find(bb => bb.id === vlanModal.parentId);
+          if (b) b.ip = "";
+        }
+      }
     });
     setVlanModal(null);
   }, [vlanModal, namespaces, dockerReady, execAndLog, update]);
@@ -666,6 +694,46 @@ export default function NetnsVisualizer() {
     }
     update(s => { s.vlans = s.vlans.filter(v => v.id !== id); });
   }, [vlans, namespaces, dockerReady, execAndLog, update]);
+
+  /* ── Bridge Port VLAN ── */
+  const openBridgeVlanModal = useCallback((bridgeId, bridgeName, dev, devType, vethId, vethEnd, nsId) => {
+    setBridgeVlanModal({ bridgeId, bridgeName, dev, devType, vethId, vethEnd, nsId, newVid: '', newPvid: false, newUntagged: false });
+  }, []);
+
+  const addBridgeVlan = useCallback(async () => {
+    if (!bridgeVlanModal) return;
+    const { bridgeId, dev, devType, vethId, vethEnd, nsId, newVid, newPvid, newUntagged } = bridgeVlanModal;
+    const vid = parseInt(newVid, 10);
+    if (!vid || vid < 1 || vid > 4094) { alert('VLAN IDは1〜4094の範囲で入力してください'); return; }
+    const ns = namespaces.find(n => n.id === nsId);
+    if (dockerReady && ns) {
+      let cmd = `ip netns exec ${ns.name} bridge vlan add dev ${dev} vid ${vid}`;
+      if (devType === 'self') cmd += ' self';
+      if (newPvid) cmd += ' pvid';
+      if (newUntagged) cmd += ' untagged';
+      const r = await execAndLog(cmd);
+      if (!r.success) { alert(`Failed: ${r.output}`); return; }
+    }
+    update(s => {
+      if (!s.bridgeVlans) s.bridgeVlans = [];
+      s.bridgeVlans.push({ id: uid(), bridgeId, dev, devType, vethId: vethId || null, vethEnd: vethEnd || null, vid, pvid: newPvid, untagged: newUntagged, nsId });
+    });
+    setBridgeVlanModal(m => ({ ...m, newVid: '', newPvid: false, newUntagged: false }));
+  }, [bridgeVlanModal, namespaces, dockerReady, execAndLog, update]);
+
+  const deleteBridgeVlan = useCallback(async (id) => {
+    const bv = bridgeVlans.find(v => v.id === id);
+    if (!bv) return;
+    if (dockerReady) {
+      const ns = namespaces.find(n => n.id === bv.nsId);
+      if (ns) {
+        let cmd = `ip netns exec ${ns.name} bridge vlan del dev ${bv.dev} vid ${bv.vid}`;
+        if (bv.devType === 'self') cmd += ' self';
+        await execAndLog(cmd);
+      }
+    }
+    update(s => { s.bridgeVlans = (s.bridgeVlans || []).filter(v => v.id !== id); });
+  }, [bridgeVlans, namespaces, dockerReady, execAndLog, update]);
 
   /* ── Save / Load ── */
   const saveTopology = useCallback(async () => {
@@ -810,6 +878,7 @@ export default function NetnsVisualizer() {
       const ns = namespaces.find(n => n.id === b.nsId); if (!ns) return;
       const p = `ip netns exec ${ns.name} `;
       c.push(`${p}ip link add ${b.name} type bridge`, `${p}ip link set ${b.name} up`);
+      if (b.vlanFiltering) c.push(`${p}ip link set ${b.name} type bridge vlan_filtering 1`);
       if (b.ip) c.push(`${p}ip addr add ${b.ip} dev ${b.name}`);
       c.push("");
     });
@@ -839,6 +908,18 @@ export default function NetnsVisualizer() {
         c.push("");
       });
     }
+    if (bridgeVlans.length) {
+      c.push("# --- Bridge Port VLANs ---");
+      bridgeVlans.forEach(bv => {
+        const ns = namespaces.find(n => n.id === bv.nsId); if (!ns) return;
+        let cmd = `ip netns exec ${ns.name} bridge vlan add dev ${bv.dev} vid ${bv.vid}`;
+        if (bv.devType === 'self') cmd += ' self';
+        if (bv.pvid) cmd += ' pvid';
+        if (bv.untagged) cmd += ' untagged';
+        c.push(cmd);
+      });
+      c.push("");
+    }
     routes.forEach(r => {
       const ns = namespaces.find(n => n.id === r.nsId); if (!ns) return;
       c.push(`ip netns exec ${ns.name} ip route add ${r.dest} via ${r.gateway}${r.iface ? ` dev ${r.iface}` : ""}`);
@@ -853,7 +934,7 @@ export default function NetnsVisualizer() {
       });
     }
     setCmdLog(c); setShowCmd(true);
-  }, [namespaces, bridges, veths, vlans, routes, commands]);
+  }, [namespaces, bridges, veths, vlans, bridgeVlans, routes, commands]);
 
   /* ── Add operations ── */
   const addNs = () => { const i = namespaces.length; setModal({ type: "addNs", data: { name: `ns${i+1}`, color: NS_COLORS[i%NS_COLORS.length] } }); };
@@ -877,7 +958,7 @@ export default function NetnsVisualizer() {
         await execAndLog(`${p} ip link set ${data.name} up`);
         if (data.ip) await execAndLog(`${p} ip addr add ${data.ip} dev ${data.name}`);
       }
-      update(s => s.bridges.push({ id: uid(), name: data.name, nsId: data.nsId, ip: data.ip }));
+      update(s => s.bridges.push({ id: uid(), name: data.name, nsId: data.nsId, ip: data.ip, vlanFiltering: false }));
     } else if (type === "addVeth") {
       if (dockerReady) {
         const nsA = namespaces.find(n => n.id === data.endANs), nsB = namespaces.find(n => n.id === data.endBNs);
@@ -967,16 +1048,31 @@ export default function NetnsVisualizer() {
     setSelected(null);
   };
 
+  const toggleBridgeVlanFiltering = async (id) => {
+    const br = bridges.find(b => b.id === id);
+    if (!br) return;
+    const newVal = !br.vlanFiltering;
+    if (dockerReady) {
+      const ns = namespaces.find(n => n.id === br.nsId);
+      if (ns) await execAndLog(`ip netns exec ${ns.name} ip link set ${br.name} type bridge vlan_filtering ${newVal ? 1 : 0}`);
+    }
+    update(s => {
+      const b = s.bridges.find(b => b.id === id);
+      if (b) b.vlanFiltering = newVal;
+      if (!newVal) s.bridgeVlans = (s.bridgeVlans || []).filter(bv => bv.bridgeId !== id);
+    });
+  };
+
   const deleteBridge = async (id) => {
     const br = bridges.find(b => b.id === id);
     if (dockerReady && br) { const ns = namespaces.find(n => n.id === br.nsId); if (ns) await execAndLog(`ip netns exec ${ns.name} ip link del ${br.name}`); }
-    update(s => { s.bridges = s.bridges.filter(b => b.id !== id); s.veths.forEach(v => { if (v.endA.bridge === id) v.endA.bridge = null; if (v.endB.bridge === id) v.endB.bridge = null; }); s.vlans = s.vlans.filter(vl => !(vl.parentType === 'bridge' && vl.parentId === id)); });
+    update(s => { s.bridges = s.bridges.filter(b => b.id !== id); s.veths.forEach(v => { if (v.endA.bridge === id) v.endA.bridge = null; if (v.endB.bridge === id) v.endB.bridge = null; }); s.vlans = s.vlans.filter(vl => !(vl.parentType === 'bridge' && vl.parentId === id)); s.bridgeVlans = (s.bridgeVlans || []).filter(bv => bv.bridgeId !== id); });
   };
 
   const deleteVeth = async (id) => {
     const v = veths.find(vv => vv.id === id);
     if (dockerReady && v) { const ns = namespaces.find(n => n.id === v.endA.nsId); if (ns) await execAndLog(`ip netns exec ${ns.name} ip link del ${v.endA.name}`); }
-    update(s => { s.veths = s.veths.filter(v => v.id !== id); s.vlans = s.vlans.filter(vl => !(vl.parentType === 'veth' && vl.parentId === id)); });
+    update(s => { s.veths = s.veths.filter(v => v.id !== id); s.vlans = s.vlans.filter(vl => !(vl.parentType === 'veth' && vl.parentId === id)); s.bridgeVlans = (s.bridgeVlans || []).filter(bv => bv.vethId !== id); });
   };
 
   const deleteRoute = (id) => update(s => { s.routes = s.routes.filter(r => r.id !== id); });
@@ -1107,10 +1203,11 @@ export default function NetnsVisualizer() {
                             <rect x={ns.x+8} y={y+4} width={NS_W-16} height={NS_ITEM_H-6} rx={4} fill={COLORS.greenGlow} />
                             <text x={ns.x+20} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" fontSize={11} fill={COLORS.green} fontFamily="'JetBrains Mono', monospace" fontWeight="600">🌉 {b.name}</text>
                             {b.ip && <text x={ns.x+NS_W-70} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" textAnchor="end" fontSize={10} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace">{b.ip}</text>}
-                            {dockerReady && <g onClick={e => { e.stopPropagation(); openVlanModal('bridge', b.id, null, b.name, ns.id); }} style={{ cursor: "pointer" }}>
-                              <rect x={ns.x+NS_W-52} y={y+NS_ITEM_H/2-8} width={18} height={16} rx={3} fill={COLORS.cyan+"30"} />
-                              <text x={ns.x+NS_W-43} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" textAnchor="middle" fontSize={9} fill={COLORS.cyan} fontFamily="'JetBrains Mono', monospace" fontWeight="700">V</text>
-                            </g>}
+                            <g onClick={e => { e.stopPropagation(); toggleBridgeVlanFiltering(b.id); }} style={{ cursor: "pointer" }}>
+                              <text x={ns.x+NS_W-76} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" textAnchor="end" fontSize={8} fill={b.vlanFiltering ? COLORS.cyan : COLORS.textMuted} fontFamily="'JetBrains Mono', monospace" fontWeight="600">VLAN</text>
+                              <rect x={ns.x+NS_W-72} y={y+NS_ITEM_H/2-6} width={24} height={12} rx={6} fill={b.vlanFiltering ? COLORS.cyan : COLORS.border} />
+                              <circle cx={b.vlanFiltering ? ns.x+NS_W-54 : ns.x+NS_W-66} cy={y+NS_ITEM_H/2} r={5} fill={b.vlanFiltering ? "#fff" : COLORS.textMuted} />
+                            </g>
                             <g onClick={e => { e.stopPropagation(); deleteBridge(b.id); }} style={{ cursor: "pointer" }}><text x={ns.x+NS_W-24} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" fontSize={10} fill={COLORS.red} style={{ opacity: 0.5 }}>✕</text></g>
                           </g>); idx++;
                         });
@@ -1137,9 +1234,13 @@ export default function NetnsVisualizer() {
                                   {v[end].mac}
                                 </text>
                               )}
-                              {dockerReady && <g onClick={e => { e.stopPropagation(); openVlanModal('veth', v.id, end, v[end].name, ns.id); }} style={{ cursor: "pointer" }}>
-                                <rect x={ns.x+20} y={y+25} width={18} height={14} rx={3} fill={ns.color+"30"} />
-                                <text x={ns.x+29} y={y+33} dominantBaseline="middle" textAnchor="middle" fontSize={9} fill={ns.color} fontFamily="'JetBrains Mono', monospace" fontWeight="700">V</text>
+                              {dockerReady && !v[end].bridge && <g onClick={e => { e.stopPropagation(); openVlanModal('veth', v.id, end, v[end].name, ns.id, v[end].ip); }} style={{ cursor: "pointer" }}>
+                                <rect x={ns.x+20} y={y+25} width={18} height={14} rx={3} fill={COLORS.orange+"30"} />
+                                <text x={ns.x+29} y={y+33} dominantBaseline="middle" textAnchor="middle" fontSize={9} fill={COLORS.orange} fontFamily="'JetBrains Mono', monospace" fontWeight="700">V</text>
+                              </g>}
+                              {dockerReady && v[end].bridge && bridges.find(b => b.id === v[end].bridge)?.vlanFiltering && <g onClick={e => { e.stopPropagation(); const br = bridges.find(b => b.id === v[end].bridge); if (br) openBridgeVlanModal(br.id, br.name, v[end].name, 'veth', v.id, end, ns.id); }} style={{ cursor: "pointer" }}>
+                                <rect x={ns.x+42} y={y+25} width={20} height={14} rx={3} fill={COLORS.cyan+"30"} />
+                                <text x={ns.x+52} y={y+33} dominantBaseline="middle" textAnchor="middle" fontSize={8} fill={COLORS.cyan} fontFamily="'JetBrains Mono', monospace" fontWeight="700">BV</text>
                               </g>}
                               <g onClick={e => { e.stopPropagation(); deleteVeth(v.id); }} style={{ cursor: "pointer" }}><text x={ns.x+NS_W-24} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" fontSize={10} fill={COLORS.red} style={{ opacity: 0.5 }}>✕</text></g>
                             </g>); idx++;
@@ -1328,8 +1429,9 @@ export default function NetnsVisualizer() {
 
       {ifaceModal && (
         <Modal title={`インターフェース設定: ${ifaceModal.ifaceName}`} onClose={() => setIfaceModal(null)} width={420}>
-          <div style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 12, fontFamily: "'JetBrains Mono', monospace" }}>
-            現在のIP: <span style={{ color: COLORS.text }}>{ifaceModal.currentIp || '(未設定)'}</span>
+          <div style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 12, fontFamily: "'JetBrains Mono', monospace", display: "flex", alignItems: "center", gap: 8 }}>
+            <span>現在のIP: <span style={{ color: COLORS.text }}>{ifaceModal.currentIp || '(未設定)'}</span></span>
+            {ifaceModal.currentIp && <Btn small color={COLORS.red} onClick={deleteIfaceIp} style={{ padding: "2px 8px", fontSize: 10 }}>削除</Btn>}
           </div>
           <Input label="新しいIPアドレス (CIDR)" value={ifaceModal.newIp} onChange={v => setIfaceModal({...ifaceModal, newIp: v})} mono placeholder="192.168.1.1/24" />
           <div style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 12, fontFamily: "'JetBrains Mono', monospace" }}>
@@ -1352,9 +1454,58 @@ export default function NetnsVisualizer() {
           <Input label="VLAN ID (1-4094)" value={vlanModal.vlanId} onChange={v => setVlanModal({...vlanModal, vlanId: v})} mono placeholder="100" />
           <Input label="IP Address (任意)" value={vlanModal.ip} onChange={v => setVlanModal({...vlanModal, ip: v})} mono placeholder="10.0.100.1/24" />
           <div style={{ fontSize: 10, color: COLORS.textDim, marginBottom: 12 }}>※ {vlanModal.ifaceName}.{vlanModal.vlanId || 'ID'} というサブインターフェースが作成されます</div>
+          {vlanModal.parentIp && (
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: COLORS.text, marginBottom: 12, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
+              <input type="checkbox" checked={vlanModal.removeParentIp} onChange={e => setVlanModal({...vlanModal, removeParentIp: e.target.checked})} />
+              親インターフェースのIP ({vlanModal.parentIp}) を削除する
+            </label>
+          )}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
             <Btn ghost small onClick={() => setVlanModal(null)}>キャンセル</Btn>
             <Btn small color={COLORS.cyan} onClick={confirmVlan} disabled={!vlanModal.vlanId}>追加</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {bridgeVlanModal && (
+        <Modal title={`ブリッジポートVLAN: ${bridgeVlanModal.dev} (${bridgeVlanModal.bridgeName})`} onClose={() => setBridgeVlanModal(null)} width={460}>
+          <div style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 8, fontFamily: "'JetBrains Mono', monospace" }}>
+            ポート: <span style={{ color: COLORS.text }}>{bridgeVlanModal.dev}</span>
+            {bridgeVlanModal.devType === 'self' && <span style={{ color: COLORS.cyan }}> (self)</span>}
+          </div>
+          {/* 設定済みVLAN一覧 */}
+          <div style={{ marginBottom: 12, maxHeight: 180, overflow: "auto" }}>
+            {(bridgeVlans || []).filter(bv => bv.bridgeId === bridgeVlanModal.bridgeId && bv.dev === bridgeVlanModal.dev && bv.devType === bridgeVlanModal.devType).map(bv => (
+              <div key={bv.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 8px", marginBottom: 4, borderRadius: 4, background: COLORS.bg, border: `1px solid ${COLORS.border}`, fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>
+                <span style={{ color: COLORS.cyan }}>VID {bv.vid}</span>
+                <span style={{ color: COLORS.textDim, fontSize: 10 }}>
+                  {bv.pvid && <span style={{ marginRight: 6, color: COLORS.green }}>PVID</span>}
+                  {bv.untagged && <span style={{ marginRight: 6, color: COLORS.orange }}>Untagged</span>}
+                </span>
+                <Btn small ghost onClick={() => deleteBridgeVlan(bv.id)} style={{ color: COLORS.red, fontSize: 10 }}>✕</Btn>
+              </div>
+            ))}
+            {!(bridgeVlans || []).filter(bv => bv.bridgeId === bridgeVlanModal.bridgeId && bv.dev === bridgeVlanModal.dev && bv.devType === bridgeVlanModal.devType).length && (
+              <div style={{ color: COLORS.textDim, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", padding: 8 }}>VLANエントリなし</div>
+            )}
+          </div>
+          {/* 追加フォーム */}
+          <div style={{ borderTop: `1px solid ${COLORS.border}`, paddingTop: 12 }}>
+            <Input label="VLAN ID (1-4094)" value={bridgeVlanModal.newVid} onChange={v => setBridgeVlanModal(m => ({...m, newVid: v}))} mono placeholder="100" />
+            <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: COLORS.text, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
+                <input type="checkbox" checked={bridgeVlanModal.newPvid} onChange={e => setBridgeVlanModal(m => ({...m, newPvid: e.target.checked}))} />
+                PVID
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: COLORS.text, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
+                <input type="checkbox" checked={bridgeVlanModal.newUntagged} onChange={e => setBridgeVlanModal(m => ({...m, newUntagged: e.target.checked}))} />
+                Untagged
+              </label>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <Btn ghost small onClick={() => setBridgeVlanModal(null)}>閉じる</Btn>
+              <Btn small color={COLORS.cyan} onClick={addBridgeVlan} disabled={!bridgeVlanModal.newVid}>追加</Btn>
+            </div>
           </div>
         </Modal>
       )}

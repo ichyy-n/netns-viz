@@ -1429,7 +1429,7 @@ export default function NetnsVisualizer() {
                                   {v[end].mac}
                                 </text>
                               )}
-                              {/* BV button - bridge VLAN config */}
+                              {/* VL button - bridge VLAN config */}
                               {dockerReady && v[end].bridge && (() => {
                                 const br = bridges.find(bb => bb.id === v[end].bridge);
                                 if (!br || !br.vlanFiltering) return null;

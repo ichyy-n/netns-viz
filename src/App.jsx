@@ -1221,11 +1221,7 @@ export default function NetnsVisualizer() {
           <Btn small ghost onClick={loadTopology}><Icon d={Icons.folder} size={12} color={COLORS.textMuted} /> 読込</Btn>
         </>)}
         <Btn small ghost onClick={() => setShowLog(!showLog)}><Icon d={Icons.code} size={12} color={COLORS.textMuted} /> ログ</Btn>
-        <Btn small ghost onClick={() => setShowVlanSubIface(!showVlanSubIface)}
-          style={{ color: showVlanSubIface ? COLORS.cyan : COLORS.textMuted }}>
-          🏷 端末VLAN {showVlanSubIface ? 'ON' : 'OFF'}
-        </Btn>
-        <Btn small ghost onClick={generateCommands} disabled={!namespaces.length}><Icon d={Icons.terminal} size={12} color={COLORS.textMuted} /> コマンド生成</Btn>
+<Btn small ghost onClick={generateCommands} disabled={!namespaces.length}><Icon d={Icons.terminal} size={12} color={COLORS.textMuted} /> コマンド生成</Btn>
         {isElectron() && <Btn small ghost onClick={openHostTerminal} disabled={!dockerReady}><Icon d={Icons.terminal} size={12} color={COLORS.textMuted} /> ターミナル(host)</Btn>}
         <Btn small ghost onClick={resetAll}><Icon d={Icons.x} size={12} color={COLORS.textMuted} /> リセット</Btn>
         <div style={{ fontSize: 11, color: COLORS.textDim, fontFamily: "'JetBrains Mono', monospace" }}>{Math.round(zoom * 100)}%</div>

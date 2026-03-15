@@ -1210,14 +1210,14 @@ export default function NetnsVisualizer() {
                                   {v[end].mac}
                                 </text>
                               )}
-                              {/* BV button - bridge VLAN config */}
+                              {/* VL button - bridge VLAN config */}
                               {dockerReady && v[end].bridge && (() => {
                                 const br = bridges.find(bb => bb.id === v[end].bridge);
                                 if (!br || !br.vlanFiltering) return null;
                                 return (
                                   <g onClick={e => { e.stopPropagation(); openBridgeVlanModal(br.id, br.name, v[end].name, 'port', v.id, end, v[end].nsId); }} style={{ cursor: "pointer" }}>
                                     <rect x={ns.x+42} y={y+24} width={20} height={14} rx={3} fill={COLORS.cyan+"30"} />
-                                    <text x={ns.x+52} y={y+33} textAnchor="middle" fontSize={8} fill={COLORS.cyan} fontFamily="'JetBrains Mono', monospace" fontWeight="700">BV</text>
+                                    <text x={ns.x+52} y={y+33} textAnchor="middle" fontSize={8} fill={COLORS.cyan} fontFamily="'JetBrains Mono', monospace" fontWeight="700">VL</text>
                                   </g>
                                 );
                               })()}

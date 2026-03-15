@@ -804,45 +804,6 @@ export default function NetnsVisualizer() {
     setIfaceModal(null);
   }, [ifaceModal, dockerReady, execAndLog, update]);
 
-  const openVlanModal = useCallback((parentType, parentId, parentEnd, ifaceName, nsId, parentIp) => {
-    setVlanModal({ parentType, parentId, parentEnd, ifaceName, nsId, vlanId: '', ip: '', parentIp: parentIp || '', removeParentIp: false });
-  }, []);
-
-  const confirmVlan = useCallback(async () => {
-    if (!vlanModal || !vlanModal.vlanId) return;
-    const vid = parseInt(vlanModal.vlanId, 10);
-    if (isNaN(vid) || vid < 1 || vid > 4094) { alert('VLAN ID は 1〜4094 の範囲で指定してください'); return; }
-    const ns = namespaces.find(n => n.id === vlanModal.nsId);
-    if (!ns) return;
-    const vlanName = `${vlanModal.ifaceName}.${vid}`;
-    const p = `ip netns exec ${ns.name}`;
-    if (dockerReady) {
-      let r = await execAndLog(`${p} ip link add link ${vlanModal.ifaceName} name ${vlanName} type vlan id ${vid}`);
-      if (!r.success) { alert(`Failed: ${r.output}`); return; }
-      await execAndLog(`${p} ip link set ${vlanName} up`);
-      if (vlanModal.ip) await execAndLog(`${p} ip addr add ${vlanModal.ip} dev ${vlanName}`);
-    }
-    if (vlanModal.removeParentIp && vlanModal.parentIp) {
-      if (dockerReady) {
-        await execAndLog(`${p} ip addr del ${vlanModal.parentIp} dev ${vlanModal.ifaceName}`);
-      }
-    }
-    update(s => {
-      if (!s.vlans) s.vlans = [];
-      s.vlans.push({ id: uid(), parentType: vlanModal.parentType, parentId: vlanModal.parentId, parentEnd: vlanModal.parentEnd, vlanId: vid, name: vlanName, ip: vlanModal.ip, nsId: vlanModal.nsId });
-      if (vlanModal.removeParentIp && vlanModal.parentIp) {
-        if (vlanModal.parentType === 'veth') {
-          const v = s.veths.find(vv => vv.id === vlanModal.parentId);
-          if (v && vlanModal.parentEnd) v[vlanModal.parentEnd].ip = "";
-        } else if (vlanModal.parentType === 'bridge') {
-          const b = s.bridges.find(bb => bb.id === vlanModal.parentId);
-          if (b) b.ip = "";
-        }
-      }
-    });
-    setVlanModal(null);
-  }, [vlanModal, namespaces, dockerReady, execAndLog, update]);
-
   const deleteVlan = useCallback(async (id) => {
     const vl = vlans.find(v => v.id === id);
     if (dockerReady && vl) {
@@ -851,46 +812,6 @@ export default function NetnsVisualizer() {
     }
     update(s => { s.vlans = s.vlans.filter(v => v.id !== id); });
   }, [vlans, namespaces, dockerReady, execAndLog, update]);
-
-  /* ── Bridge Port VLAN ── */
-  const openBridgeVlanModal = useCallback((bridgeId, bridgeName, dev, devType, vethId, vethEnd, nsId) => {
-    setBridgeVlanModal({ bridgeId, bridgeName, dev, devType, vethId, vethEnd, nsId, newVid: '', newPvid: false, newUntagged: false });
-  }, []);
-
-  const addBridgeVlan = useCallback(async () => {
-    if (!bridgeVlanModal) return;
-    const { bridgeId, dev, devType, vethId, vethEnd, nsId, newVid, newPvid, newUntagged } = bridgeVlanModal;
-    const vid = parseInt(newVid, 10);
-    if (!vid || vid < 1 || vid > 4094) { alert('VLAN IDは1〜4094の範囲で入力してください'); return; }
-    const ns = namespaces.find(n => n.id === nsId);
-    if (dockerReady && ns) {
-      let cmd = `ip netns exec ${ns.name} bridge vlan add dev ${dev} vid ${vid}`;
-      if (devType === 'self') cmd += ' self';
-      if (newPvid) cmd += ' pvid';
-      if (newUntagged) cmd += ' untagged';
-      const r = await execAndLog(cmd);
-      if (!r.success) { alert(`Failed: ${r.output}`); return; }
-    }
-    update(s => {
-      if (!s.bridgeVlans) s.bridgeVlans = [];
-      s.bridgeVlans.push({ id: uid(), bridgeId, dev, devType, vethId: vethId || null, vethEnd: vethEnd || null, vid, pvid: newPvid, untagged: newUntagged, nsId });
-    });
-    setBridgeVlanModal(m => ({ ...m, newVid: '', newPvid: false, newUntagged: false }));
-  }, [bridgeVlanModal, namespaces, dockerReady, execAndLog, update]);
-
-  const deleteBridgeVlan = useCallback(async (id) => {
-    const bv = bridgeVlans.find(v => v.id === id);
-    if (!bv) return;
-    if (dockerReady) {
-      const ns = namespaces.find(n => n.id === bv.nsId);
-      if (ns) {
-        let cmd = `ip netns exec ${ns.name} bridge vlan del dev ${bv.dev} vid ${bv.vid}`;
-        if (bv.devType === 'self') cmd += ' self';
-        await execAndLog(cmd);
-      }
-    }
-    update(s => { s.bridgeVlans = (s.bridgeVlans || []).filter(v => v.id !== id); });
-  }, [bridgeVlans, namespaces, dockerReady, execAndLog, update]);
 
   /* ── Save / Load ── */
   const saveTopology = useCallback(async () => {
@@ -1235,21 +1156,6 @@ export default function NetnsVisualizer() {
       return next;
     });
     setSelected(null);
-  };
-
-  const toggleBridgeVlanFiltering = async (id) => {
-    const br = bridges.find(b => b.id === id);
-    if (!br) return;
-    const newVal = !br.vlanFiltering;
-    if (dockerReady) {
-      const ns = namespaces.find(n => n.id === br.nsId);
-      if (ns) await execAndLog(`ip netns exec ${ns.name} ip link set ${br.name} type bridge vlan_filtering ${newVal ? 1 : 0}`);
-    }
-    update(s => {
-      const b = s.bridges.find(b => b.id === id);
-      if (b) b.vlanFiltering = newVal;
-      if (!newVal) s.bridgeVlans = (s.bridgeVlans || []).filter(bv => bv.bridgeId !== id);
-    });
   };
 
   const deleteBridge = async (id) => {
@@ -1658,70 +1564,6 @@ export default function NetnsVisualizer() {
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
             <Btn ghost small onClick={() => setIfaceModal(null)}>キャンセル</Btn>
             <Btn small color={COLORS.orange} onClick={changeIface} disabled={!ifaceModal.newIp && !ifaceModal.newMac}>変更</Btn>
-          </div>
-        </Modal>
-      )}
-
-      {vlanModal && (
-        <Modal title={`タグVLAN追加: ${vlanModal.ifaceName}`} onClose={() => setVlanModal(null)} width={400}>
-          <div style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 12, fontFamily: "'JetBrains Mono', monospace" }}>
-            親インターフェース: <span style={{ color: COLORS.text }}>{vlanModal.ifaceName}</span>
-          </div>
-          <Input label="VLAN ID (1-4094)" value={vlanModal.vlanId} onChange={v => setVlanModal({...vlanModal, vlanId: v})} mono placeholder="100" />
-          <Input label="IP Address (任意)" value={vlanModal.ip} onChange={v => setVlanModal({...vlanModal, ip: v})} mono placeholder="10.0.100.1/24" />
-          <div style={{ fontSize: 10, color: COLORS.textDim, marginBottom: 12 }}>※ {vlanModal.ifaceName}.{vlanModal.vlanId || 'ID'} というサブインターフェースが作成されます</div>
-          {vlanModal.parentIp && (
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: COLORS.text, marginBottom: 12, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
-              <input type="checkbox" checked={vlanModal.removeParentIp} onChange={e => setVlanModal({...vlanModal, removeParentIp: e.target.checked})} />
-              親インターフェースのIP ({vlanModal.parentIp}) を削除する
-            </label>
-          )}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <Btn ghost small onClick={() => setVlanModal(null)}>キャンセル</Btn>
-            <Btn small color={COLORS.cyan} onClick={confirmVlan} disabled={!vlanModal.vlanId}>追加</Btn>
-          </div>
-        </Modal>
-      )}
-
-      {bridgeVlanModal && (
-        <Modal title={`ブリッジポートVLAN: ${bridgeVlanModal.dev} (${bridgeVlanModal.bridgeName})`} onClose={() => setBridgeVlanModal(null)} width={460}>
-          <div style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 8, fontFamily: "'JetBrains Mono', monospace" }}>
-            ポート: <span style={{ color: COLORS.text }}>{bridgeVlanModal.dev}</span>
-            {bridgeVlanModal.devType === 'self' && <span style={{ color: COLORS.cyan }}> (self)</span>}
-          </div>
-          {/* 設定済みVLAN一覧 */}
-          <div style={{ marginBottom: 12, maxHeight: 180, overflow: "auto" }}>
-            {(bridgeVlans || []).filter(bv => bv.bridgeId === bridgeVlanModal.bridgeId && bv.dev === bridgeVlanModal.dev && bv.devType === bridgeVlanModal.devType).map(bv => (
-              <div key={bv.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 8px", marginBottom: 4, borderRadius: 4, background: COLORS.bg, border: `1px solid ${COLORS.border}`, fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>
-                <span style={{ color: COLORS.cyan }}>VID {bv.vid}</span>
-                <span style={{ color: COLORS.textDim, fontSize: 10 }}>
-                  {bv.pvid && <span style={{ marginRight: 6, color: COLORS.green }}>PVID</span>}
-                  {bv.untagged && <span style={{ marginRight: 6, color: COLORS.orange }}>Untagged</span>}
-                </span>
-                <Btn small ghost onClick={() => deleteBridgeVlan(bv.id)} style={{ color: COLORS.red, fontSize: 10 }}>✕</Btn>
-              </div>
-            ))}
-            {!(bridgeVlans || []).filter(bv => bv.bridgeId === bridgeVlanModal.bridgeId && bv.dev === bridgeVlanModal.dev && bv.devType === bridgeVlanModal.devType).length && (
-              <div style={{ color: COLORS.textDim, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", padding: 8 }}>VLANエントリなし</div>
-            )}
-          </div>
-          {/* 追加フォーム */}
-          <div style={{ borderTop: `1px solid ${COLORS.border}`, paddingTop: 12 }}>
-            <Input label="VLAN ID (1-4094)" value={bridgeVlanModal.newVid} onChange={v => setBridgeVlanModal(m => ({...m, newVid: v}))} mono placeholder="100" />
-            <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: COLORS.text, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
-                <input type="checkbox" checked={bridgeVlanModal.newPvid} onChange={e => setBridgeVlanModal(m => ({...m, newPvid: e.target.checked}))} />
-                PVID
-              </label>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: COLORS.text, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
-                <input type="checkbox" checked={bridgeVlanModal.newUntagged} onChange={e => setBridgeVlanModal(m => ({...m, newUntagged: e.target.checked}))} />
-                Untagged
-              </label>
-            </div>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <Btn ghost small onClick={() => setBridgeVlanModal(null)}>閉じる</Btn>
-              <Btn small color={COLORS.cyan} onClick={addBridgeVlan} disabled={!bridgeVlanModal.newVid}>追加</Btn>
-            </div>
           </div>
         </Modal>
       )}

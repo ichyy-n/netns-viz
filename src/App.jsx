@@ -470,9 +470,17 @@ export default function NetnsVisualizer() {
   const [vlanModal, setVlanModal] = useState(null);
   const [bridgeVlanModal, setBridgeVlanModal] = useState(null);
   const logEndRef = useRef(null);
+  const [showTemplateMenu, setShowTemplateMenu] = useState(false);
+
+  const TEMPLATES = [
+    { key: "ch01_vlan", label: "Ch.1 VLAN", file: "/templates/template_ch01_vlan.json" },
+    { key: "ch02_routing", label: "Ch.2 Routing", file: "/templates/template_ch02_routing.json" },
+    { key: "ch03_nat", label: "Ch.3 NAT", file: "/templates/template_ch03_nat.json" },
+  ];
 
   const { namespaces, bridges, veths, vlans, bridgeVlans, routes, commands } = state;
   const [showVlanSubIface, setShowVlanSubIface] = useState(false);
+  const [ipForwardMap, setIpForwardMap] = useState({});
   const update = useCallback((fn) => setState(prev => { const n = JSON.parse(JSON.stringify(prev)); fn(n); return n; }), []);
   const addExecLog = useCallback((cmd, output, ok = true) => setExecLog(prev => [...prev, { cmd, output, success: ok, time: new Date().toLocaleTimeString() }]), []);
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [execLog]);
@@ -517,6 +525,35 @@ export default function NetnsVisualizer() {
     addExecLog(cmd, r.output || (r.success ? 'OK' : 'Failed'), r.success);
     return r;
   }, [dockerReady, addExecLog]);
+
+  const toggleIpForward = useCallback(async (ns) => {
+    const cur = ipForwardMap[ns.id] || false;
+    const val = cur ? 0 : 1;
+    const r = await execAndLog(`ip netns exec ${ns.name} sysctl -w net.ipv4.ip_forward=${val}`);
+    if (r.success) setIpForwardMap(prev => ({ ...prev, [ns.id]: !cur }));
+  }, [ipForwardMap, execAndLog]);
+
+  const loadTemplate = useCallback(async (templateFile) => {
+    try {
+      const res = await fetch(templateFile);
+      if (!res.ok) throw new Error(`Failed to fetch ${templateFile}`);
+      const data = await res.json();
+      setState({
+        namespaces: data.namespaces || [],
+        bridges: data.bridges || [],
+        veths: data.veths || [],
+        vlans: data.vlans || [],
+        bridgeVlans: data.bridgeVlans || [],
+        routes: data.routes || [],
+        commands: data.commands || [],
+      });
+      setIpForwardMap({});
+      setShowTemplateMenu(false);
+      addExecLog('template', `Loaded: ${templateFile}`);
+    } catch (e) {
+      addExecLog('template', `Error: ${e.message}`, false);
+    }
+  }, [addExecLog]);
 
   const fetchIfaceRuntime = useCallback(async (ifaceName, nsName) => {
     if (!dockerReady) return { ip: "", mac: null };
@@ -1220,6 +1257,21 @@ export default function NetnsVisualizer() {
           <Btn small ghost onClick={saveTopology} disabled={!namespaces.length}><Icon d={Icons.save} size={12} color={COLORS.textMuted} /> 保存</Btn>
           <Btn small ghost onClick={loadTopology}><Icon d={Icons.folder} size={12} color={COLORS.textMuted} /> 読込</Btn>
         </>)}
+        <div style={{ position: "relative", display: "inline-block" }}>
+          <Btn small ghost onClick={() => setShowTemplateMenu(!showTemplateMenu)}>📋 テンプレート</Btn>
+          {showTemplateMenu && (
+            <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 100, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: 4, minWidth: 180, boxShadow: "0 4px 12px rgba(0,0,0,0.4)" }}>
+              {TEMPLATES.map(t => (
+                <div key={t.key} onClick={() => loadTemplate(t.file)}
+                  style={{ padding: "8px 12px", fontSize: 12, color: COLORS.text, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer", borderRadius: 4, transition: "background 0.15s" }}
+                  onMouseEnter={e => e.currentTarget.style.background = COLORS.surfaceHover}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                  {t.label}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         <Btn small ghost onClick={() => setShowLog(!showLog)}><Icon d={Icons.code} size={12} color={COLORS.textMuted} /> ログ</Btn>
 <Btn small ghost onClick={generateCommands} disabled={!namespaces.length}><Icon d={Icons.terminal} size={12} color={COLORS.textMuted} /> コマンド生成</Btn>
         {isElectron() && <Btn small ghost onClick={openHostTerminal} disabled={!dockerReady}><Icon d={Icons.terminal} size={12} color={COLORS.textMuted} /> ターミナル(host)</Btn>}
@@ -1266,6 +1318,14 @@ export default function NetnsVisualizer() {
                       <circle cx={ns.x+18} cy={ns.y+NS_HEADER/2} r={5} fill={ns.color} />
                       <text x={ns.x+32} y={ns.y+NS_HEADER/2+1} dominantBaseline="middle" fontSize={13} fontWeight="700" fill={COLORS.text} fontFamily="'JetBrains Mono', monospace">{ns.name}</text>
                       
+                      {/* ip_forward toggle */}
+                      {dockerReady && (
+                        <g onClick={e => { e.stopPropagation(); toggleIpForward(ns); }} style={{ cursor: "pointer" }}>
+                          <rect x={ns.x+NS_W-142} y={ns.y+10} width={28} height={22} rx={4} fill={ipForwardMap[ns.id] ? COLORS.green+"30" : COLORS.border} />
+                          <text x={ns.x+NS_W-128} y={ns.y+23} fontSize={8} fill={ipForwardMap[ns.id] ? COLORS.green : COLORS.textDim} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">FW</text>
+                        </g>
+                      )}
+
                       {/* Route button */}
                       {dockerReady && (
                         <g onClick={e => { e.stopPropagation(); showRouteTable(ns); }} style={{ cursor: "pointer" }}>

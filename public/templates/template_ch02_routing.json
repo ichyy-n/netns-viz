@@ -1,0 +1,35 @@
+{
+  "namespaces": [
+    { "id": "r1", "name": "Router1", "x": 60, "y": 80, "color": "#3b82f6", "isDefault": false },
+    { "id": "r2", "name": "Router2", "x": 500, "y": 80, "color": "#10b981", "isDefault": false },
+    { "id": "pc1", "name": "PC1", "x": 60, "y": 450, "color": "#f59e0b", "isDefault": false },
+    { "id": "pc2", "name": "PC2", "x": 500, "y": 450, "color": "#a855f7", "isDefault": false }
+  ],
+  "bridges": [],
+  "veths": [
+    {
+      "id": "veth_r2r", "name": "router-link",
+      "endA": { "id": "r1_r2", "name": "eth-r2", "nsId": "r1", "ip": "10.0.0.1/30", "mac": "", "bridge": "" },
+      "endB": { "id": "r2_r1", "name": "eth-r1", "nsId": "r2", "ip": "10.0.0.2/30", "mac": "", "bridge": "" }
+    },
+    {
+      "id": "veth_pc1", "name": "pc1-link",
+      "endA": { "id": "r1_pc1", "name": "eth-pc1", "nsId": "r1", "ip": "192.168.1.254/24", "mac": "", "bridge": "" },
+      "endB": { "id": "pc1_r1", "name": "eth0", "nsId": "pc1", "ip": "192.168.1.1/24", "mac": "", "bridge": "" }
+    },
+    {
+      "id": "veth_pc2", "name": "pc2-link",
+      "endA": { "id": "r2_pc2", "name": "eth-pc2", "nsId": "r2", "ip": "192.168.2.254/24", "mac": "", "bridge": "" },
+      "endB": { "id": "pc2_r2", "name": "eth0", "nsId": "pc2", "ip": "192.168.2.1/24", "mac": "", "bridge": "" }
+    }
+  ],
+  "vlans": [],
+  "bridgeVlans": [],
+  "routes": [
+    { "id": "rt1", "nsId": "r1", "dest": "192.168.2.0/24", "gateway": "10.0.0.2", "iface": "eth-r2" },
+    { "id": "rt2", "nsId": "r2", "dest": "192.168.1.0/24", "gateway": "10.0.0.1", "iface": "eth-r1" },
+    { "id": "rt3", "nsId": "pc1", "dest": "0.0.0.0/0", "gateway": "192.168.1.254", "iface": "eth0" },
+    { "id": "rt4", "nsId": "pc2", "dest": "0.0.0.0/0", "gateway": "192.168.2.254", "iface": "eth0" }
+  ],
+  "commands": []
+}

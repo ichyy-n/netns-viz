@@ -457,6 +457,7 @@ export default function NetnsVisualizer() {
   const [panStart, setPanStart] = useState(null);
   const [selected, setSelected] = useState(null);
   const svgRef = useRef(null);
+  const isApplyingRef = useRef(false);
 
   const [dockerReady, setDockerReady] = useState(false);
   const [dockerLoading, setDockerLoading] = useState(false);
@@ -535,6 +536,12 @@ export default function NetnsVisualizer() {
 
   // Shared: clean existing env → rebuild from data → update GUI state
   const applyTopologyData = useCallback(async (data) => {
+    if (isApplyingRef.current) {
+      console.log('applyTopologyData: already running, skipping');
+      return;
+    }
+    isApplyingRef.current = true;
+    try {
     if (dockerReady) {
       addExecLog('load', 'Cleaning current environment...');
       const listResult = await window.electronAPI.docker.exec('ip netns list');
@@ -617,6 +624,9 @@ export default function NetnsVisualizer() {
     if (!Array.isArray(data.vlans)) data.vlans = [];
     setState(data);
     setTerminalTabs([]); setActiveTermTab(null); setShowTerminal(false);
+    } finally {
+      isApplyingRef.current = false;
+    }
   }, [dockerReady, execAndLog, addExecLog]);
 
   const loadTemplate = useCallback(async (templateFile) => {

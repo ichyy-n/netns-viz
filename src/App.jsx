@@ -1080,8 +1080,17 @@ export default function NetnsVisualizer() {
     const { type, data } = modal;
 
     if (type === "addNs") {
-      if (dockerReady) { const r = await execAndLog(`ip netns add ${data.name}`); if (!r.success) { alert(`Failed: ${r.output}`); return; } }
-      update(s => { const mx = s.namespaces.reduce((m,n) => Math.max(m,n.x), 0); s.namespaces.push({ id: uid(), name: data.name, x: s.namespaces.length === 0 ? 60 : mx + NS_W + 60, y: 80, color: data.color, isDefault: false }); });
+      const nsId = uid();
+      if (dockerReady) {
+        const r = await execAndLog(`ip netns add ${data.name}`);
+        if (!r.success) { alert(`Failed: ${r.output}`); return; }
+        const fwRes = await execAndLog(`ip netns exec ${data.name} cat /proc/sys/net/ipv4/ip_forward`);
+        if (fwRes.success) {
+          const fwVal = (fwRes.output || '').trim() === '1';
+          setIpForwardMap(prev => ({ ...prev, [nsId]: fwVal }));
+        }
+      }
+      update(s => { const mx = s.namespaces.reduce((m,n) => Math.max(m,n.x), 0); s.namespaces.push({ id: nsId, name: data.name, x: s.namespaces.length === 0 ? 60 : mx + NS_W + 60, y: 80, color: data.color, isDefault: false }); });
     } else if (type === "addBridge") {
       const ns = namespaces.find(n => n.id === data.nsId);
       if (dockerReady && ns) {

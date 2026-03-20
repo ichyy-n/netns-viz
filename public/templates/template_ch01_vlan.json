@@ -14,40 +14,40 @@
   "veths": [
     {
       "id": "veth_trunk", "name": "trunk-link",
-      "endA": { "id": "trunk_a", "name": "eth-trunk-sw1", "nsId": "sw1", "ip": "", "mac": "", "bridge": "br_sw1" },
-      "endB": { "id": "trunk_b", "name": "eth-trunk-sw2", "nsId": "sw2", "ip": "", "mac": "", "bridge": "br_sw2" }
+      "endA": { "id": "trunk_a", "name": "veth1", "nsId": "sw1", "ip": "", "mac": "", "bridge": "br_sw1" },
+      "endB": { "id": "trunk_b", "name": "veth2", "nsId": "sw2", "ip": "", "mac": "", "bridge": "br_sw2" }
     },
     {
       "id": "veth_pc1", "name": "pc1-link",
-      "endA": { "id": "pc1_sw", "name": "eth-pc1", "nsId": "sw1", "ip": "", "mac": "", "bridge": "br_sw1" },
-      "endB": { "id": "pc1_if", "name": "eth0", "nsId": "pc1", "ip": "192.168.10.1/24", "mac": "", "bridge": "" }
+      "endA": { "id": "pc1_sw", "name": "veth3", "nsId": "sw1", "ip": "", "mac": "", "bridge": "br_sw1" },
+      "endB": { "id": "pc1_if", "name": "veth4", "nsId": "pc1", "ip": "192.168.10.1/24", "mac": "", "bridge": "" }
     },
     {
       "id": "veth_pc2", "name": "pc2-link",
-      "endA": { "id": "pc2_sw", "name": "eth-pc2", "nsId": "sw2", "ip": "", "mac": "", "bridge": "br_sw2" },
-      "endB": { "id": "pc2_if", "name": "eth0", "nsId": "pc2", "ip": "192.168.10.2/24", "mac": "", "bridge": "" }
+      "endA": { "id": "pc2_sw", "name": "veth5", "nsId": "sw2", "ip": "", "mac": "", "bridge": "br_sw2" },
+      "endB": { "id": "pc2_if", "name": "veth6", "nsId": "pc2", "ip": "192.168.10.2/24", "mac": "", "bridge": "" }
     },
     {
       "id": "veth_pc3", "name": "pc3-link",
-      "endA": { "id": "pc3_sw", "name": "eth-pc3", "nsId": "sw1", "ip": "", "mac": "", "bridge": "br_sw1" },
-      "endB": { "id": "pc3_if", "name": "eth0", "nsId": "pc3", "ip": "192.168.20.1/24", "mac": "", "bridge": "" }
+      "endA": { "id": "pc3_sw", "name": "veth7", "nsId": "sw1", "ip": "", "mac": "", "bridge": "br_sw1" },
+      "endB": { "id": "pc3_if", "name": "veth8", "nsId": "pc3", "ip": "192.168.20.1/24", "mac": "", "bridge": "" }
     },
     {
       "id": "veth_pc4", "name": "pc4-link",
-      "endA": { "id": "pc4_sw", "name": "eth-pc4", "nsId": "sw2", "ip": "", "mac": "", "bridge": "br_sw2" },
-      "endB": { "id": "pc4_if", "name": "eth0", "nsId": "pc4", "ip": "192.168.20.2/24", "mac": "", "bridge": "" }
+      "endA": { "id": "pc4_sw", "name": "veth9", "nsId": "sw2", "ip": "", "mac": "", "bridge": "br_sw2" },
+      "endB": { "id": "pc4_if", "name": "veth10", "nsId": "pc4", "ip": "192.168.20.2/24", "mac": "", "bridge": "" }
     }
   ],
   "vlans": [],
   "bridgeVlans": [
-    { "id": "bv1", "nsId": "sw1", "bridgeId": "br_sw1", "dev": "eth-pc1", "vid": 10, "pvid": true, "untagged": true, "devType": "port" },
-    { "id": "bv2", "nsId": "sw1", "bridgeId": "br_sw1", "dev": "eth-pc3", "vid": 20, "pvid": true, "untagged": true, "devType": "port" },
-    { "id": "bv3", "nsId": "sw1", "bridgeId": "br_sw1", "dev": "eth-trunk-sw1", "vid": 10, "pvid": false, "untagged": false, "devType": "port" },
-    { "id": "bv4", "nsId": "sw1", "bridgeId": "br_sw1", "dev": "eth-trunk-sw1", "vid": 20, "pvid": false, "untagged": false, "devType": "port" },
-    { "id": "bv5", "nsId": "sw2", "bridgeId": "br_sw2", "dev": "eth-pc2", "vid": 10, "pvid": true, "untagged": true, "devType": "port" },
-    { "id": "bv6", "nsId": "sw2", "bridgeId": "br_sw2", "dev": "eth-pc4", "vid": 20, "pvid": true, "untagged": true, "devType": "port" },
-    { "id": "bv7", "nsId": "sw2", "bridgeId": "br_sw2", "dev": "eth-trunk-sw2", "vid": 10, "pvid": false, "untagged": false, "devType": "port" },
-    { "id": "bv8", "nsId": "sw2", "bridgeId": "br_sw2", "dev": "eth-trunk-sw2", "vid": 20, "pvid": false, "untagged": false, "devType": "port" }
+    { "id": "bv1", "nsId": "sw1", "bridgeId": "br_sw1", "dev": "veth3", "vid": 10, "pvid": true, "untagged": true, "devType": "port" },
+    { "id": "bv2", "nsId": "sw1", "bridgeId": "br_sw1", "dev": "veth7", "vid": 20, "pvid": true, "untagged": true, "devType": "port" },
+    { "id": "bv3", "nsId": "sw1", "bridgeId": "br_sw1", "dev": "veth1", "vid": 10, "pvid": false, "untagged": false, "devType": "port" },
+    { "id": "bv4", "nsId": "sw1", "bridgeId": "br_sw1", "dev": "veth1", "vid": 20, "pvid": false, "untagged": false, "devType": "port" },
+    { "id": "bv5", "nsId": "sw2", "bridgeId": "br_sw2", "dev": "veth5", "vid": 10, "pvid": true, "untagged": true, "devType": "port" },
+    { "id": "bv6", "nsId": "sw2", "bridgeId": "br_sw2", "dev": "veth9", "vid": 20, "pvid": true, "untagged": true, "devType": "port" },
+    { "id": "bv7", "nsId": "sw2", "bridgeId": "br_sw2", "dev": "veth2", "vid": 10, "pvid": false, "untagged": false, "devType": "port" },
+    { "id": "bv8", "nsId": "sw2", "bridgeId": "br_sw2", "dev": "veth2", "vid": 20, "pvid": false, "untagged": false, "devType": "port" }
   ],
   "routes": [],
   "commands": []

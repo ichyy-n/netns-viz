@@ -457,7 +457,6 @@ export default function NetnsVisualizer() {
   const [panStart, setPanStart] = useState(null);
   const [selected, setSelected] = useState(null);
   const svgRef = useRef(null);
-  const isApplyingRef = useRef(false);
 
   const [dockerReady, setDockerReady] = useState(false);
   const [dockerLoading, setDockerLoading] = useState(false);
@@ -471,13 +470,6 @@ export default function NetnsVisualizer() {
   const [vlanModal, setVlanModal] = useState(null);
   const [bridgeVlanModal, setBridgeVlanModal] = useState(null);
   const logEndRef = useRef(null);
-  const [showTemplateMenu, setShowTemplateMenu] = useState(false);
-
-  const TEMPLATES = [
-    { key: "ch01_vlan", label: "Ch.1 VLAN", file: "/templates/template_ch01_vlan.json" },
-    { key: "ch02_routing", label: "Ch.2 Routing", file: "/templates/template_ch02_routing.json" },
-    { key: "ch03_nat", label: "Ch.3 NAT", file: "/templates/template_ch03_nat.json" },
-  ];
 
   const { namespaces, bridges, veths, vlans, bridgeVlans, routes, commands } = state;
   const [showVlanSubIface, setShowVlanSubIface] = useState(false);
@@ -536,12 +528,6 @@ export default function NetnsVisualizer() {
 
   // Shared: clean existing env → rebuild from data → update GUI state
   const applyTopologyData = useCallback(async (data) => {
-    if (isApplyingRef.current) {
-      console.log('applyTopologyData: already running, skipping');
-      return;
-    }
-    isApplyingRef.current = true;
-    try {
     if (dockerReady) {
       addExecLog('load', 'Cleaning current environment...');
       const listResult = await window.electronAPI.docker.exec('ip netns list');
@@ -624,22 +610,7 @@ export default function NetnsVisualizer() {
     if (!Array.isArray(data.vlans)) data.vlans = [];
     setState(data);
     setTerminalTabs([]); setActiveTermTab(null); setShowTerminal(false);
-    } finally {
-      isApplyingRef.current = false;
-    }
   }, [dockerReady, execAndLog, addExecLog]);
-
-  const loadTemplate = useCallback(async (templateFile) => {
-    try {
-      const res = await fetch(templateFile);
-      if (!res.ok) throw new Error(`Failed to fetch ${templateFile}`);
-      const data = await res.json();
-      await applyTopologyData(data);
-      setShowTemplateMenu(false);
-    } catch (e) {
-      addExecLog('template', `Error: ${e.message}`, false);
-    }
-  }, [applyTopologyData, addExecLog]);
 
   const fetchIfaceRuntime = useCallback(async (ifaceName, nsName) => {
     if (!dockerReady) return { ip: "", mac: null };
@@ -1266,21 +1237,6 @@ export default function NetnsVisualizer() {
           <Btn small ghost onClick={saveTopology} disabled={!namespaces.length}><Icon d={Icons.save} size={12} color={COLORS.textMuted} /> 保存</Btn>
           <Btn small ghost onClick={loadTopology}><Icon d={Icons.folder} size={12} color={COLORS.textMuted} /> 読込</Btn>
         </>)}
-        <div style={{ position: "relative", display: "inline-block" }}>
-          <Btn small ghost onClick={() => setShowTemplateMenu(!showTemplateMenu)}>📋 テンプレート</Btn>
-          {showTemplateMenu && (
-            <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 100, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: 4, minWidth: 180, boxShadow: "0 4px 12px rgba(0,0,0,0.4)" }}>
-              {TEMPLATES.map(t => (
-                <div key={t.key} onClick={() => loadTemplate(t.file)}
-                  style={{ padding: "8px 12px", fontSize: 12, color: COLORS.text, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer", borderRadius: 4, transition: "background 0.15s" }}
-                  onMouseEnter={e => e.currentTarget.style.background = COLORS.surfaceHover}
-                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                  {t.label}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
         <Btn small ghost onClick={() => setShowLog(!showLog)}><Icon d={Icons.code} size={12} color={COLORS.textMuted} /> ログ</Btn>
 <Btn small ghost onClick={generateCommands} disabled={!namespaces.length}><Icon d={Icons.terminal} size={12} color={COLORS.textMuted} /> コマンド生成</Btn>
         {isElectron() && <Btn small ghost onClick={openHostTerminal} disabled={!dockerReady}><Icon d={Icons.terminal} size={12} color={COLORS.textMuted} /> ターミナル(host)</Btn>}

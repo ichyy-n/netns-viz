@@ -14,8 +14,8 @@
   "veths": [
     {
       "id": "veth_trunk", "name": "trunk-link",
-      "endA": { "id": "trunk_a", "name": "eth-trunk", "nsId": "sw1", "ip": "", "mac": "", "bridge": "br_sw1" },
-      "endB": { "id": "trunk_b", "name": "eth-trunk", "nsId": "sw2", "ip": "", "mac": "", "bridge": "br_sw2" }
+      "endA": { "id": "trunk_a", "name": "eth-trunk-sw1", "nsId": "sw1", "ip": "", "mac": "", "bridge": "br_sw1" },
+      "endB": { "id": "trunk_b", "name": "eth-trunk-sw2", "nsId": "sw2", "ip": "", "mac": "", "bridge": "br_sw2" }
     },
     {
       "id": "veth_pc1", "name": "pc1-link",
@@ -42,12 +42,12 @@
   "bridgeVlans": [
     { "id": "bv1", "nsId": "sw1", "bridgeId": "br_sw1", "dev": "eth-pc1", "vid": 10, "pvid": true, "untagged": true, "devType": "port" },
     { "id": "bv2", "nsId": "sw1", "bridgeId": "br_sw1", "dev": "eth-pc3", "vid": 20, "pvid": true, "untagged": true, "devType": "port" },
-    { "id": "bv3", "nsId": "sw1", "bridgeId": "br_sw1", "dev": "eth-trunk", "vid": 10, "pvid": false, "untagged": false, "devType": "port" },
-    { "id": "bv4", "nsId": "sw1", "bridgeId": "br_sw1", "dev": "eth-trunk", "vid": 20, "pvid": false, "untagged": false, "devType": "port" },
+    { "id": "bv3", "nsId": "sw1", "bridgeId": "br_sw1", "dev": "eth-trunk-sw1", "vid": 10, "pvid": false, "untagged": false, "devType": "port" },
+    { "id": "bv4", "nsId": "sw1", "bridgeId": "br_sw1", "dev": "eth-trunk-sw1", "vid": 20, "pvid": false, "untagged": false, "devType": "port" },
     { "id": "bv5", "nsId": "sw2", "bridgeId": "br_sw2", "dev": "eth-pc2", "vid": 10, "pvid": true, "untagged": true, "devType": "port" },
     { "id": "bv6", "nsId": "sw2", "bridgeId": "br_sw2", "dev": "eth-pc4", "vid": 20, "pvid": true, "untagged": true, "devType": "port" },
-    { "id": "bv7", "nsId": "sw2", "bridgeId": "br_sw2", "dev": "eth-trunk", "vid": 10, "pvid": false, "untagged": false, "devType": "port" },
-    { "id": "bv8", "nsId": "sw2", "bridgeId": "br_sw2", "dev": "eth-trunk", "vid": 20, "pvid": false, "untagged": false, "devType": "port" }
+    { "id": "bv7", "nsId": "sw2", "bridgeId": "br_sw2", "dev": "eth-trunk-sw2", "vid": 10, "pvid": false, "untagged": false, "devType": "port" },
+    { "id": "bv8", "nsId": "sw2", "bridgeId": "br_sw2", "dev": "eth-trunk-sw2", "vid": 20, "pvid": false, "untagged": false, "devType": "port" }
   ],
   "routes": [],
   "commands": []

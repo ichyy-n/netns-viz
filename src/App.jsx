@@ -625,9 +625,7 @@ export default function NetnsVisualizer() {
       if (!res.ok) throw new Error(`Failed to fetch ${templateFile}`);
       const data = await res.json();
       await applyTopologyData(data);
-      setIpForwardMap({});
       setShowTemplateMenu(false);
-      addExecLog('template', `Loaded & applied: ${templateFile}`);
     } catch (e) {
       addExecLog('template', `Error: ${e.message}`, false);
     }

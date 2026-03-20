@@ -537,7 +537,14 @@ export default function NetnsVisualizer() {
   const applyTopologyData = useCallback(async (data) => {
     if (dockerReady) {
       addExecLog('load', 'Cleaning current environment...');
-      for (const ns of namespaces) await execAndLog(`ip netns del ${ns.name}`);
+      const listResult = await window.electronAPI.docker.exec('ip netns list');
+      if (listResult.success && listResult.output) {
+        const existingNs = listResult.output.trim().split('\n')
+          .map(line => line.split(/\s/)[0]).filter(Boolean);
+        for (const nsName of existingNs) {
+          await execAndLog(`ip netns del ${nsName}`);
+        }
+      }
       addExecLog('load', 'Rebuilding from data...');
 
       for (const ns of data.namespaces) await execAndLog(`ip netns add ${ns.name}`);
@@ -610,7 +617,7 @@ export default function NetnsVisualizer() {
     if (!Array.isArray(data.vlans)) data.vlans = [];
     setState(data);
     setTerminalTabs([]); setActiveTermTab(null); setShowTerminal(false);
-  }, [dockerReady, namespaces, execAndLog, addExecLog]);
+  }, [dockerReady, execAndLog, addExecLog]);
 
   const loadTemplate = useCallback(async (templateFile) => {
     try {

@@ -1286,8 +1286,8 @@ export default function NetnsVisualizer() {
                       {/* ip_forward toggle */}
                       {dockerReady && (
                         <g onClick={e => { e.stopPropagation(); toggleIpForward(ns); }} style={{ cursor: "pointer" }}>
-                          <rect x={ns.x+NS_W-142} y={ns.y+10} width={28} height={22} rx={4} fill={ipForwardMap[ns.id] ? (ns.color || COLORS.green)+"30" : COLORS.border} />
-                          <text x={ns.x+NS_W-128} y={ns.y+23} fontSize={8} fill={ipForwardMap[ns.id] ? (ns.color || COLORS.green) : COLORS.textDim} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">FW</text>
+                          <rect x={ns.x+NS_W-142} y={ns.y+10} width={28} height={22} rx={4} fill={ipForwardMap[ns.id] ? (ns.color || COLORS.green)+"20" : COLORS.border} />
+                          <text x={ns.x+NS_W-128} y={ns.y+23} fontSize={10} fill={ipForwardMap[ns.id] ? (ns.color || COLORS.green) : COLORS.textDim} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">FW</text>
                         </g>
                       )}
 

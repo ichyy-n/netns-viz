@@ -603,12 +603,18 @@ export default function NetnsVisualizer() {
           await execAndLog(`ip netns exec ${ns.name} ${line.trim()}`);
         }
       }
+      for (const ns of data.namespaces) {
+        if (data.ipForwardMap && data.ipForwardMap[ns.id]) {
+          await execAndLog(`ip netns exec ${ns.name} sysctl -w net.ipv4.ip_forward=1`);
+        }
+      }
       addExecLog('load', 'Environment rebuilt ✓');
     }
 
     if (!Array.isArray(data.commands)) data.commands = [];
     if (!Array.isArray(data.vlans)) data.vlans = [];
     setState(data);
+    setIpForwardMap(data.ipForwardMap || {});
     setTerminalTabs([]); setActiveTermTab(null); setShowTerminal(false);
   }, [dockerReady, execAndLog, addExecLog]);
 
@@ -910,9 +916,9 @@ export default function NetnsVisualizer() {
   /* ── Save / Load ── */
   const saveTopology = useCallback(async () => {
     if (!isElectron()) return;
-    const r = await window.electronAPI.file.save(state);
+    const r = await window.electronAPI.file.save({ ...state, ipForwardMap });
     if (r.success) addExecLog('save', `Saved to ${r.filePath}`);
-  }, [state, addExecLog]);
+  }, [state, ipForwardMap, addExecLog]);
 
   const loadTopology = useCallback(async () => {
     if (!isElectron()) return;

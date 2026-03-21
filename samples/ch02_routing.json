@@ -1,0 +1,29 @@
+{
+  "namespaces": [
+    { "id": "ch02-ns-router", "name": "router", "x": 400, "y": 100, "color": "#F44336", "isDefault": false },
+    { "id": "ch02-ns-pc1", "name": "pc1", "x": 200, "y": 300, "color": "#4CAF50", "isDefault": false },
+    { "id": "ch02-ns-pc2", "name": "pc2", "x": 600, "y": 300, "color": "#2196F3", "isDefault": false }
+  ],
+  "bridges": [],
+  "veths": [
+    {
+      "id": "ch02-v1",
+      "endA": { "id": "ch02-v1-a", "name": "veth-router-a", "nsId": "ch02-ns-router", "bridge": null, "ip": "192.168.1.254/24" },
+      "endB": { "id": "ch02-v1-b", "name": "veth-pc1", "nsId": "ch02-ns-pc1", "bridge": null, "ip": "192.168.1.1/24" }
+    },
+    {
+      "id": "ch02-v2",
+      "endA": { "id": "ch02-v2-a", "name": "veth-router-b", "nsId": "ch02-ns-router", "bridge": null, "ip": "192.168.2.254/24" },
+      "endB": { "id": "ch02-v2-b", "name": "veth-pc2", "nsId": "ch02-ns-pc2", "bridge": null, "ip": "192.168.2.1/24" }
+    }
+  ],
+  "routes": [
+    { "id": "ch02-rt1", "nsId": "ch02-ns-pc1", "dest": "0.0.0.0/0", "gateway": "192.168.1.254", "iface": "veth-pc1" },
+    { "id": "ch02-rt2", "nsId": "ch02-ns-pc2", "dest": "0.0.0.0/0", "gateway": "192.168.2.254", "iface": "veth-pc2" }
+  ],
+  "vlans": [],
+  "bridgeVlans": [],
+  "commands": [],
+  "ipForwardMap": { "ch02-ns-router": true },
+  "iptablesMap": {}
+}

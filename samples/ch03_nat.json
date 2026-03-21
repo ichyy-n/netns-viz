@@ -1,0 +1,34 @@
+{
+  "namespaces": [
+    { "id": "ch03-ns-router", "name": "router", "x": 400, "y": 100, "color": "#F44336", "isDefault": false },
+    { "id": "ch03-ns-pc1", "name": "pc1", "x": 200, "y": 300, "color": "#4CAF50", "isDefault": false },
+    { "id": "ch03-ns-server", "name": "server", "x": 600, "y": 300, "color": "#607D8B", "isDefault": false }
+  ],
+  "bridges": [],
+  "veths": [
+    {
+      "id": "ch03-v1",
+      "endA": { "id": "ch03-v1-a", "name": "veth-router-in", "nsId": "ch03-ns-router", "bridge": null, "ip": "192.168.1.254/24" },
+      "endB": { "id": "ch03-v1-b", "name": "veth-pc1", "nsId": "ch03-ns-pc1", "bridge": null, "ip": "192.168.1.1/24" }
+    },
+    {
+      "id": "ch03-v2",
+      "endA": { "id": "ch03-v2-a", "name": "veth-router-out", "nsId": "ch03-ns-router", "bridge": null, "ip": "203.0.113.254/24" },
+      "endB": { "id": "ch03-v2-b", "name": "veth-server", "nsId": "ch03-ns-server", "bridge": null, "ip": "203.0.113.1/24" }
+    }
+  ],
+  "routes": [
+    { "id": "ch03-rt1", "nsId": "ch03-ns-pc1", "dest": "0.0.0.0/0", "gateway": "192.168.1.254", "iface": "veth-pc1" },
+    { "id": "ch03-rt2", "nsId": "ch03-ns-server", "dest": "0.0.0.0/0", "gateway": "203.0.113.254", "iface": "veth-server" }
+  ],
+  "vlans": [],
+  "bridgeVlans": [],
+  "commands": [],
+  "ipForwardMap": { "ch03-ns-router": true },
+  "iptablesMap": {
+    "ch03-ns-router": [
+      { "id": "ch03-ipt1", "table": "nat", "chain": "POSTROUTING", "target": "MASQUERADE", "extra": "-o veth-router-out" },
+      { "id": "ch03-ipt2", "table": "filter", "chain": "FORWARD", "target": "ACCEPT", "extra": "" }
+    ]
+  }
+}

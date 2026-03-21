@@ -1,0 +1,56 @@
+{
+  "namespaces": [
+    { "id": "ch01-ns-sw1", "name": "sw1", "x": 300, "y": 100, "color": "#4CAF50", "isDefault": false },
+    { "id": "ch01-ns-sw2", "name": "sw2", "x": 700, "y": 100, "color": "#2196F3", "isDefault": false },
+    { "id": "ch01-ns-pc1", "name": "pc1", "x": 100, "y": 300, "color": "#FF9800", "isDefault": false },
+    { "id": "ch01-ns-pc2", "name": "pc2", "x": 300, "y": 300, "color": "#FF9800", "isDefault": false },
+    { "id": "ch01-ns-pc3", "name": "pc3", "x": 700, "y": 300, "color": "#9C27B0", "isDefault": false },
+    { "id": "ch01-ns-pc4", "name": "pc4", "x": 900, "y": 300, "color": "#9C27B0", "isDefault": false }
+  ],
+  "bridges": [
+    { "id": "ch01-br-sw1", "name": "br0", "nsId": "ch01-ns-sw1", "ip": "", "vlanFiltering": true },
+    { "id": "ch01-br-sw2", "name": "br0", "nsId": "ch01-ns-sw2", "ip": "", "vlanFiltering": true }
+  ],
+  "veths": [
+    {
+      "id": "ch01-v1",
+      "endA": { "id": "ch01-v1-a", "name": "veth-sw1-p1", "nsId": "ch01-ns-sw1", "bridge": "ch01-br-sw1", "ip": "" },
+      "endB": { "id": "ch01-v1-b", "name": "veth-pc1", "nsId": "ch01-ns-pc1", "bridge": null, "ip": "192.168.10.1/24" }
+    },
+    {
+      "id": "ch01-v2",
+      "endA": { "id": "ch01-v2-a", "name": "veth-sw1-p2", "nsId": "ch01-ns-sw1", "bridge": "ch01-br-sw1", "ip": "" },
+      "endB": { "id": "ch01-v2-b", "name": "veth-pc2", "nsId": "ch01-ns-pc2", "bridge": null, "ip": "192.168.10.2/24" }
+    },
+    {
+      "id": "ch01-v3",
+      "endA": { "id": "ch01-v3-a", "name": "veth-sw1-trunk", "nsId": "ch01-ns-sw1", "bridge": "ch01-br-sw1", "ip": "" },
+      "endB": { "id": "ch01-v3-b", "name": "veth-sw2-trunk", "nsId": "ch01-ns-sw2", "bridge": "ch01-br-sw2", "ip": "" }
+    },
+    {
+      "id": "ch01-v4",
+      "endA": { "id": "ch01-v4-a", "name": "veth-sw2-p1", "nsId": "ch01-ns-sw2", "bridge": "ch01-br-sw2", "ip": "" },
+      "endB": { "id": "ch01-v4-b", "name": "veth-pc3", "nsId": "ch01-ns-pc3", "bridge": null, "ip": "192.168.20.1/24" }
+    },
+    {
+      "id": "ch01-v5",
+      "endA": { "id": "ch01-v5-a", "name": "veth-sw2-p2", "nsId": "ch01-ns-sw2", "bridge": "ch01-br-sw2", "ip": "" },
+      "endB": { "id": "ch01-v5-b", "name": "veth-pc4", "nsId": "ch01-ns-pc4", "bridge": null, "ip": "192.168.20.2/24" }
+    }
+  ],
+  "routes": [],
+  "vlans": [],
+  "bridgeVlans": [
+    { "id": "ch01-bv1", "nsId": "ch01-ns-sw1", "dev": "veth-sw1-p1", "devType": "port", "vid": 10, "pvid": true, "untagged": true },
+    { "id": "ch01-bv2", "nsId": "ch01-ns-sw1", "dev": "veth-sw1-p2", "devType": "port", "vid": 10, "pvid": true, "untagged": true },
+    { "id": "ch01-bv3", "nsId": "ch01-ns-sw1", "dev": "veth-sw1-trunk", "devType": "port", "vid": 10, "pvid": false, "untagged": false },
+    { "id": "ch01-bv4", "nsId": "ch01-ns-sw1", "dev": "veth-sw1-trunk", "devType": "port", "vid": 20, "pvid": false, "untagged": false },
+    { "id": "ch01-bv5", "nsId": "ch01-ns-sw2", "dev": "veth-sw2-trunk", "devType": "port", "vid": 10, "pvid": false, "untagged": false },
+    { "id": "ch01-bv6", "nsId": "ch01-ns-sw2", "dev": "veth-sw2-trunk", "devType": "port", "vid": 20, "pvid": false, "untagged": false },
+    { "id": "ch01-bv7", "nsId": "ch01-ns-sw2", "dev": "veth-sw2-p1", "devType": "port", "vid": 20, "pvid": true, "untagged": true },
+    { "id": "ch01-bv8", "nsId": "ch01-ns-sw2", "dev": "veth-sw2-p2", "devType": "port", "vid": 20, "pvid": true, "untagged": true }
+  ],
+  "commands": [],
+  "ipForwardMap": {},
+  "iptablesMap": {}
+}

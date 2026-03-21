@@ -1,0 +1,38 @@
+{
+  "namespaces": [
+    { "id": "ch04-ns-fw", "name": "fw", "x": 400, "y": 100, "color": "#FF5722", "isDefault": false },
+    { "id": "ch04-ns-pc1", "name": "pc1", "x": 200, "y": 300, "color": "#4CAF50", "isDefault": false },
+    { "id": "ch04-ns-server", "name": "server", "x": 600, "y": 300, "color": "#607D8B", "isDefault": false }
+  ],
+  "bridges": [],
+  "veths": [
+    {
+      "id": "ch04-v1",
+      "endA": { "id": "ch04-v1-a", "name": "veth-fw-in", "nsId": "ch04-ns-fw", "bridge": null, "ip": "192.168.1.254/24" },
+      "endB": { "id": "ch04-v1-b", "name": "veth-pc1", "nsId": "ch04-ns-pc1", "bridge": null, "ip": "192.168.1.1/24" }
+    },
+    {
+      "id": "ch04-v2",
+      "endA": { "id": "ch04-v2-a", "name": "veth-fw-out", "nsId": "ch04-ns-fw", "bridge": null, "ip": "203.0.113.254/24" },
+      "endB": { "id": "ch04-v2-b", "name": "veth-server", "nsId": "ch04-ns-server", "bridge": null, "ip": "203.0.113.1/24" }
+    }
+  ],
+  "routes": [
+    { "id": "ch04-rt1", "nsId": "ch04-ns-pc1", "dest": "0.0.0.0/0", "gateway": "192.168.1.254", "iface": "veth-pc1" },
+    { "id": "ch04-rt2", "nsId": "ch04-ns-server", "dest": "0.0.0.0/0", "gateway": "203.0.113.254", "iface": "veth-server" }
+  ],
+  "vlans": [],
+  "bridgeVlans": [],
+  "commands": [],
+  "ipForwardMap": { "ch04-ns-fw": true },
+  "iptablesMap": {
+    "ch04-ns-fw": [
+      { "id": "ch04-ipt1", "table": "filter", "chain": "INPUT", "target": "ACCEPT", "extra": "-m conntrack --ctstate ESTABLISHED,RELATED" },
+      { "id": "ch04-ipt2", "table": "filter", "chain": "FORWARD", "target": "ACCEPT", "extra": "-m conntrack --ctstate ESTABLISHED,RELATED" },
+      { "id": "ch04-ipt3", "table": "filter", "chain": "FORWARD", "target": "ACCEPT", "extra": "-i veth-fw-in -o veth-fw-out -p tcp -m multiport --dports 80,443" },
+      { "id": "ch04-ipt4", "table": "filter", "chain": "FORWARD", "target": "ACCEPT", "extra": "-i veth-fw-in -o veth-fw-out -p udp --dport 53" },
+      { "id": "ch04-ipt5", "table": "filter", "chain": "FORWARD", "target": "DROP", "extra": "" },
+      { "id": "ch04-ipt6", "table": "filter", "chain": "INPUT", "target": "DROP", "extra": "" }
+    ]
+  }
+}

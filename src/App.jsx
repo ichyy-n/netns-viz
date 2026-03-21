@@ -15,6 +15,13 @@ const uid = () => `id_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 const defaultState = () => ({ namespaces: [], bridges: [], veths: [], vlans: [], bridgeVlans: [], routes: [], commands: [] });
 const GUI_STATE_KEY = "netns-viz:gui-state:v1";
 
+const CHAIN_OPTIONS = {
+  filter: ['INPUT', 'OUTPUT', 'FORWARD'],
+  nat: ['PREROUTING', 'POSTROUTING', 'OUTPUT'],
+  mangle: ['PREROUTING', 'INPUT', 'OUTPUT', 'FORWARD', 'POSTROUTING'],
+  raw: ['PREROUTING', 'OUTPUT']
+};
+
 const loadGuiState = () => {
   if (typeof window === "undefined") return defaultState();
   try {
@@ -474,6 +481,8 @@ export default function NetnsVisualizer() {
   const { namespaces, bridges, veths, vlans, bridgeVlans, routes, commands } = state;
   const [showVlanSubIface, setShowVlanSubIface] = useState(false);
   const [ipForwardMap, setIpForwardMap] = useState({});
+  const [iptablesMap, setIptablesMap] = useState({});
+  const [iptablesModal, setIptablesModal] = useState(null);
   const update = useCallback((fn) => setState(prev => { const n = JSON.parse(JSON.stringify(prev)); fn(n); return n; }), []);
   const addExecLog = useCallback((cmd, output, ok = true) => setExecLog(prev => [...prev, { cmd, output, success: ok, time: new Date().toLocaleTimeString() }]), []);
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [execLog]);
@@ -514,15 +523,26 @@ export default function NetnsVisualizer() {
 
   useEffect(() => {
     if (!dockerReady || !namespaces.length) return;
-    const syncIpForward = async () => {
-      const updates = {};
+    const syncOnResume = async () => {
+      // ip_forward: Linux実態を読み取り
+      const fwUpdates = {};
       for (const ns of namespaces) {
         const r = await window.electronAPI.docker.exec(`ip netns exec ${ns.name} cat /proc/sys/net/ipv4/ip_forward`);
-        if (r.success) updates[ns.id] = (r.output || '').trim() === '1';
+        if (r.success) fwUpdates[ns.id] = (r.output || '').trim() === '1';
       }
-      if (Object.keys(updates).length) setIpForwardMap(prev => ({ ...prev, ...updates }));
+      if (Object.keys(fwUpdates).length) setIpForwardMap(prev => ({ ...prev, ...fwUpdates }));
+
+      // iptables: Reactステートから再適用（resume後はiptablesルールが消えているため）
+      for (const [nsId, rules] of Object.entries(iptablesMap)) {
+        const ns = namespaces.find(n => n.id === nsId);
+        if (!ns || !rules.length) continue;
+        for (const rule of rules) {
+          const extraPart = rule.extra ? ` ${rule.extra}` : '';
+          await window.electronAPI.docker.exec(`ip netns exec ${ns.name} iptables -t ${rule.table} -A ${rule.chain}${extraPart} -j ${rule.target}`);
+        }
+      }
     };
-    syncIpForward();
+    syncOnResume();
   }, [dockerReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const execAndLog = useCallback(async (cmd) => {
@@ -538,6 +558,32 @@ export default function NetnsVisualizer() {
     const r = await execAndLog(`ip netns exec ${ns.name} sysctl -w net.ipv4.ip_forward=${val}`);
     if (r.success) setIpForwardMap(prev => ({ ...prev, [ns.id]: !cur }));
   }, [ipForwardMap, execAndLog]);
+
+  const addIptablesRule = useCallback(async (nsId, nsName) => {
+    if (!iptablesModal) return;
+    const { table, chain, target, extra } = iptablesModal.newRule;
+    const ruleId = uid();
+    const extraPart = extra ? ` ${extra}` : '';
+    const cmd = `ip netns exec ${nsName} iptables -t ${table} -A ${chain}${extraPart} -j ${target}`;
+    const r = await execAndLog(cmd);
+    if (!r.success) { alert(`iptables追加失敗: ${r.output}`); return; }
+    setIptablesMap(prev => ({
+      ...prev,
+      [nsId]: [...(prev[nsId] || []), { id: ruleId, table, chain, target, extra }]
+    }));
+    setIptablesModal(prev => prev ? ({ ...prev, newRule: { ...prev.newRule, target: 'ACCEPT', extra: '' } }) : null);
+  }, [iptablesModal, execAndLog]);
+
+  const deleteIptablesRule = useCallback(async (nsId, nsName, ruleId, rule) => {
+    const extraPart = rule.extra ? ` ${rule.extra}` : '';
+    const cmd = `ip netns exec ${nsName} iptables -t ${rule.table} -D ${rule.chain}${extraPart} -j ${rule.target}`;
+    const r = await execAndLog(cmd);
+    if (!r.success) { alert(`iptables削除失敗: ${r.output}`); return; }
+    setIptablesMap(prev => ({
+      ...prev,
+      [nsId]: (prev[nsId] || []).filter(r => r.id !== ruleId)
+    }));
+  }, [execAndLog]);
 
   // Shared: clean existing env → rebuild from data → update GUI state
   const applyTopologyData = useCallback(async (data) => {
@@ -621,6 +667,17 @@ export default function NetnsVisualizer() {
           await execAndLog(`ip netns exec ${ns.name} sysctl -w net.ipv4.ip_forward=1`);
         }
       }
+      // iptables復元
+      if (data.iptablesMap) {
+        for (const [nsId, rules] of Object.entries(data.iptablesMap)) {
+          const ns = data.namespaces.find(n => n.id === nsId);
+          if (!ns || !rules.length) continue;
+          for (const rule of rules) {
+            const extraPart = rule.extra ? ` ${rule.extra}` : '';
+            await execAndLog(`ip netns exec ${ns.name} iptables -t ${rule.table} -A ${rule.chain}${extraPart} -j ${rule.target}`);
+          }
+        }
+      }
       addExecLog('load', 'Environment rebuilt ✓');
     }
 
@@ -628,6 +685,7 @@ export default function NetnsVisualizer() {
     if (!Array.isArray(data.vlans)) data.vlans = [];
     setState(data);
     setIpForwardMap(data.ipForwardMap || {});
+    setIptablesMap(data.iptablesMap || {});
     setTerminalTabs([]); setActiveTermTab(null); setShowTerminal(false);
   }, [dockerReady, execAndLog, addExecLog]);
 
@@ -877,6 +935,15 @@ export default function NetnsVisualizer() {
     setRouteModal({ nsId: ns.id, nsName: ns.name, nsColor: ns.color, routes: r.success ? r.output : 'Failed to fetch routes' });
   }, [dockerReady]);
 
+  const showIptables = useCallback((ns) => {
+    setIptablesModal({
+      nsId: ns.id,
+      nsName: ns.name,
+      nsColor: ns.color,
+      newRule: { table: 'filter', chain: 'INPUT', target: 'ACCEPT', extra: '' }
+    });
+  }, []);
+
   const openIfaceModal = useCallback((vethId, end, ifaceName, nsName, currentIp, currentMac) => {
     setIfaceModal({ vethId, end, ifaceName, nsName, currentIp: currentIp || '', currentMac: currentMac || '', newIp: '', newMac: '' });
   }, []);
@@ -929,9 +996,9 @@ export default function NetnsVisualizer() {
   /* ── Save / Load ── */
   const saveTopology = useCallback(async () => {
     if (!isElectron()) return;
-    const r = await window.electronAPI.file.save({ ...state, ipForwardMap });
+    const r = await window.electronAPI.file.save({ ...state, ipForwardMap, iptablesMap });
     if (r.success) addExecLog('save', `Saved to ${r.filePath}`);
-  }, [state, ipForwardMap, addExecLog]);
+  }, [state, ipForwardMap, iptablesMap, addExecLog]);
 
   const loadTopology = useCallback(async () => {
     if (!isElectron()) return;
@@ -1311,6 +1378,16 @@ export default function NetnsVisualizer() {
                       <circle cx={ns.x+18} cy={ns.y+NS_HEADER/2} r={5} fill={ns.color} />
                       <text x={ns.x+32} y={ns.y+NS_HEADER/2+1} dominantBaseline="middle" fontSize={13} fontWeight="700" fill={COLORS.text} fontFamily="'JetBrains Mono', monospace">{ns.name}</text>
                       
+                      {/* iptables button */}
+                      {dockerReady && (
+                        <g onClick={e => { e.stopPropagation(); showIptables(ns); }} style={{ cursor: "pointer" }}>
+                          <rect x={ns.x+NS_W-174} y={ns.y+10} width={28} height={22} rx={4}
+                            fill={(iptablesMap[ns.id]?.length) ? ns.color+"20" : COLORS.border} />
+                          <text x={ns.x+NS_W-160} y={ns.y+23} fontSize={9} fill={(iptablesMap[ns.id]?.length) ? ns.color : COLORS.textDim}
+                            fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">IPT</text>
+                        </g>
+                      )}
+
                       {/* ip_forward toggle */}
                       {dockerReady && (
                         <g onClick={e => { e.stopPropagation(); toggleIpForward(ns); }} style={{ cursor: "pointer" }}>
@@ -1594,6 +1671,80 @@ export default function NetnsVisualizer() {
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
             <Btn small ghost onClick={() => showRouteTable({ id: routeModal.nsId, name: routeModal.nsName })}>🔄 更新</Btn>
             <Btn small ghost onClick={() => setRouteModal(null)}>閉じる</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {iptablesModal && (
+        <Modal title={`iptables: ${iptablesModal.nsName}`} onClose={() => setIptablesModal(null)} width={600}>
+          {/* ルール一覧 */}
+          <div style={{ maxHeight: 250, overflow: 'auto', marginBottom: 12 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+                  <th style={{ textAlign: 'left', padding: '6px 8px', color: COLORS.textMuted }}>Table</th>
+                  <th style={{ textAlign: 'left', padding: '6px 8px', color: COLORS.textMuted }}>Chain</th>
+                  <th style={{ textAlign: 'left', padding: '6px 8px', color: COLORS.textMuted }}>Target</th>
+                  <th style={{ textAlign: 'left', padding: '6px 8px', color: COLORS.textMuted }}>Extra</th>
+                  <th style={{ width: 40 }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {(iptablesMap[iptablesModal.nsId] || []).map(rule => (
+                  <tr key={rule.id} style={{ borderBottom: `1px solid ${COLORS.border}22` }}>
+                    <td style={{ padding: '6px 8px', color: COLORS.text }}>{rule.table}</td>
+                    <td style={{ padding: '6px 8px', color: COLORS.text }}>{rule.chain}</td>
+                    <td style={{ padding: '6px 8px', color: iptablesModal.nsColor }}>{rule.target}</td>
+                    <td style={{ padding: '6px 8px', color: COLORS.textDim, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{rule.extra || '-'}</td>
+                    <td>
+                      <Btn small color={COLORS.red} onClick={() => deleteIptablesRule(iptablesModal.nsId, iptablesModal.nsName, rule.id, rule)}
+                        style={{ padding: '2px 6px', fontSize: 10 }}>✕</Btn>
+                    </td>
+                  </tr>
+                ))}
+                {!(iptablesMap[iptablesModal.nsId] || []).length && (
+                  <tr><td colSpan={5} style={{ padding: '12px 8px', color: COLORS.textDim, textAlign: 'center' }}>ルールなし</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* ルール追加フォーム */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', padding: '12px 0', borderTop: `1px solid ${COLORS.border}` }}>
+            <div>
+              <label style={{ fontSize: 10, color: COLORS.textMuted, display: 'block', marginBottom: 2 }}>Table</label>
+              <select value={iptablesModal.newRule.table} onChange={e => {
+                const t = e.target.value;
+                setIptablesModal(prev => ({ ...prev, newRule: { ...prev.newRule, table: t, chain: CHAIN_OPTIONS[t][0] } }));
+              }} style={{ background: COLORS.bg, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 4, padding: '4px 8px', fontSize: 12 }}>
+                {['filter', 'nat', 'mangle', 'raw'].map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: 10, color: COLORS.textMuted, display: 'block', marginBottom: 2 }}>Chain</label>
+              <select value={iptablesModal.newRule.chain} onChange={e => setIptablesModal(prev => ({ ...prev, newRule: { ...prev.newRule, chain: e.target.value } }))}
+                style={{ background: COLORS.bg, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 4, padding: '4px 8px', fontSize: 12 }}>
+                {(CHAIN_OPTIONS[iptablesModal.newRule.table] || []).map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: 10, color: COLORS.textMuted, display: 'block', marginBottom: 2 }}>Target</label>
+              <select value={iptablesModal.newRule.target} onChange={e => setIptablesModal(prev => ({ ...prev, newRule: { ...prev.newRule, target: e.target.value } }))}
+                style={{ background: COLORS.bg, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 4, padding: '4px 8px', fontSize: 12 }}>
+                {['ACCEPT', 'DROP', 'REJECT', 'MASQUERADE', 'SNAT', 'DNAT', 'LOG'].map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div style={{ flex: 1, minWidth: 150 }}>
+              <label style={{ fontSize: 10, color: COLORS.textMuted, display: 'block', marginBottom: 2 }}>Extra (match条件)</label>
+              <input value={iptablesModal.newRule.extra} onChange={e => setIptablesModal(prev => ({ ...prev, newRule: { ...prev.newRule, extra: e.target.value } }))}
+                placeholder="-s 10.0.0.0/24 -p tcp --dport 80"
+                style={{ width: '100%', background: COLORS.bg, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 4, padding: '4px 8px', fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }} />
+            </div>
+            <Btn small onClick={() => addIptablesRule(iptablesModal.nsId, iptablesModal.nsName)}>追加</Btn>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+            <Btn small ghost onClick={() => setIptablesModal(null)}>閉じる</Btn>
           </div>
         </Modal>
       )}

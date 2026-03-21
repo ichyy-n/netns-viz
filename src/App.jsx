@@ -515,9 +515,10 @@ export default function NetnsVisualizer() {
     update(s => {
       const v = s.veths.find(vv => vv.id === vethId);
       if (!v) return;
-      const tmp = v.endA;
-      v.endA = v.endB;
-      v.endB = tmp;
+      const { ip: ipA, mac: macA, ...restA } = v.endA;
+      const { ip: ipB, mac: macB, ...restB } = v.endB;
+      v.endA = { ...restB, ip: ipA, mac: macA };
+      v.endB = { ...restA, ip: ipB, mac: macB };
       s.vlans.forEach(vl => {
         if (vl.parentId === vethId) vl.parentEnd = vl.parentEnd === "endA" ? "endB" : "endA";
       });

@@ -512,6 +512,19 @@ export default function NetnsVisualizer() {
     });
   }, [addExecLog]);
 
+  useEffect(() => {
+    if (!dockerReady || !namespaces.length) return;
+    const syncIpForward = async () => {
+      const updates = {};
+      for (const ns of namespaces) {
+        const r = await window.electronAPI.docker.exec(`ip netns exec ${ns.name} cat /proc/sys/net/ipv4/ip_forward`);
+        if (r.success) updates[ns.id] = (r.output || '').trim() === '1';
+      }
+      if (Object.keys(updates).length) setIpForwardMap(prev => ({ ...prev, ...updates }));
+    };
+    syncIpForward();
+  }, [dockerReady]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const execAndLog = useCallback(async (cmd) => {
     if (!isElectron() || !dockerReady) return { success: false, output: 'Docker not ready' };
     const r = await window.electronAPI.docker.exec(cmd);

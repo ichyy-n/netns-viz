@@ -559,6 +559,17 @@ export default function NetnsVisualizer() {
           await window.electronAPI.docker.exec(`ip netns exec ${ns.name} iptables -t ${rule.table} -A ${rule.chain}${extraPart} -j ${rule.target}`);
         }
       }
+
+      // bridgeVlans: Reactステートから再適用（resume後はbridge vlan設定が消えているため）
+      for (const bv of bridgeVlans) {
+        const ns = namespaces.find(n => n.id === bv.nsId);
+        if (!ns) continue;
+        let cmd = `ip netns exec ${ns.name} bridge vlan add dev ${bv.dev} vid ${bv.vid}`;
+        if (bv.devType === 'self') cmd += ' self';
+        if (bv.pvid) cmd += ' pvid';
+        if (bv.untagged) cmd += ' untagged';
+        await window.electronAPI.docker.exec(cmd);
+      }
     };
     syncOnResume();
   }, [dockerReady]); // eslint-disable-line react-hooks/exhaustive-deps

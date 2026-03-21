@@ -1770,7 +1770,7 @@ export default function NetnsVisualizer() {
 
       {/* ── Bridge VLAN Modal ── */}
       {bridgeVlanModal && (
-        <Modal title={`ポートVLAN設定: ${bridgeVlanModal.dev} (${bridgeVlanModal.bridgeName})`} onClose={() => setBridgeVlanModal(null)} width={480}>
+        <Modal title={`VLAN設定: ${bridgeVlanModal.dev} (${bridgeVlanModal.bridgeName})`} onClose={() => setBridgeVlanModal(null)} width={480}>
           <div style={{ marginBottom: 16 }}>
             <span style={{ display: "block", fontSize: 11, color: COLORS.textMuted, marginBottom: 8, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.05em", textTransform: "uppercase" }}>ポートモード</span>
             <div style={{ display: "flex", gap: 12 }}>

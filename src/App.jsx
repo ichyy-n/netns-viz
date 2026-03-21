@@ -22,6 +22,23 @@ const CHAIN_OPTIONS = {
   raw: ['PREROUTING', 'OUTPUT']
 };
 
+// Enrich bridgeVlans entries with vethId/vethEnd if missing (older save format compatibility)
+const enrichBridgeVlans = (bridgeVlans, veths) => {
+  for (const bv of bridgeVlans) {
+    if (bv.vethId && bv.vethEnd) continue;
+    for (const v of veths) {
+      for (const end of ['endA', 'endB']) {
+        if (v[end].name === bv.dev && v[end].nsId === bv.nsId) {
+          bv.vethId = v.id;
+          bv.vethEnd = end;
+          break;
+        }
+      }
+      if (bv.vethId) break;
+    }
+  }
+};
+
 const loadGuiState = () => {
   if (typeof window === "undefined") return defaultState();
   try {
@@ -35,6 +52,7 @@ const loadGuiState = () => {
     if (!Array.isArray(parsed.commands)) parsed.commands = [];
     if (!Array.isArray(parsed.vlans)) parsed.vlans = [];
     if (!Array.isArray(parsed.bridgeVlans)) parsed.bridgeVlans = [];
+    enrichBridgeVlans(parsed.bridgeVlans, parsed.veths);
     return parsed;
   } catch {
     return defaultState();
@@ -712,6 +730,8 @@ export default function NetnsVisualizer() {
 
     if (!Array.isArray(data.commands)) data.commands = [];
     if (!Array.isArray(data.vlans)) data.vlans = [];
+    if (!Array.isArray(data.bridgeVlans)) data.bridgeVlans = [];
+    enrichBridgeVlans(data.bridgeVlans, data.veths || []);
     setState(data);
     setIpForwardMap(data.ipForwardMap || {});
     setIptablesMap(data.iptablesMap || {});

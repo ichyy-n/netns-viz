@@ -473,6 +473,7 @@ export default function NetnsVisualizer() {
 
   const { namespaces, bridges, veths, vlans, bridgeVlans, routes, commands } = state;
   const [showVlanSubIface, setShowVlanSubIface] = useState(false);
+  const [ipForwardMap, setIpForwardMap] = useState({});
   const update = useCallback((fn) => setState(prev => { const n = JSON.parse(JSON.stringify(prev)); fn(n); return n; }), []);
   const addExecLog = useCallback((cmd, output, ok = true) => setExecLog(prev => [...prev, { cmd, output, success: ok, time: new Date().toLocaleTimeString() }]), []);
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [execLog]);
@@ -511,12 +512,124 @@ export default function NetnsVisualizer() {
     });
   }, [addExecLog]);
 
+  useEffect(() => {
+    if (!dockerReady || !namespaces.length) return;
+    const syncIpForward = async () => {
+      const updates = {};
+      for (const ns of namespaces) {
+        const r = await window.electronAPI.docker.exec(`ip netns exec ${ns.name} cat /proc/sys/net/ipv4/ip_forward`);
+        if (r.success) updates[ns.id] = (r.output || '').trim() === '1';
+      }
+      if (Object.keys(updates).length) setIpForwardMap(prev => ({ ...prev, ...updates }));
+    };
+    syncIpForward();
+  }, [dockerReady]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const execAndLog = useCallback(async (cmd) => {
     if (!isElectron() || !dockerReady) return { success: false, output: 'Docker not ready' };
     const r = await window.electronAPI.docker.exec(cmd);
     addExecLog(cmd, r.output || (r.success ? 'OK' : 'Failed'), r.success);
     return r;
   }, [dockerReady, addExecLog]);
+
+  const toggleIpForward = useCallback(async (ns) => {
+    const cur = ipForwardMap[ns.id] || false;
+    const val = cur ? 0 : 1;
+    const r = await execAndLog(`ip netns exec ${ns.name} sysctl -w net.ipv4.ip_forward=${val}`);
+    if (r.success) setIpForwardMap(prev => ({ ...prev, [ns.id]: !cur }));
+  }, [ipForwardMap, execAndLog]);
+
+  // Shared: clean existing env → rebuild from data → update GUI state
+  const applyTopologyData = useCallback(async (data) => {
+    if (dockerReady) {
+      addExecLog('load', 'Cleaning current environment...');
+      const listResult = await window.electronAPI.docker.exec('ip netns list');
+      if (listResult.success && listResult.output) {
+        const existingNs = listResult.output.trim().split('\n')
+          .map(line => line.split(/\s/)[0]).filter(Boolean);
+        for (const nsName of existingNs) {
+          await execAndLog(`ip netns del ${nsName}`);
+        }
+      }
+      addExecLog('load', 'Rebuilding from data...');
+
+      for (const ns of data.namespaces) await execAndLog(`ip netns add ${ns.name}`);
+
+      for (const b of (data.bridges || [])) {
+        const ns = data.namespaces.find(n => n.id === b.nsId);
+        if (!ns) continue;
+        const p = `ip netns exec ${ns.name}`;
+        await execAndLog(`${p} ip link add ${b.name} type bridge`);
+        await execAndLog(`${p} ip link set ${b.name} up`);
+        if (b.ip) await execAndLog(`${p} ip addr add ${b.ip} dev ${b.name}`);
+        if (b.vlanFiltering) await execAndLog(`${p} ip link set ${b.name} type bridge vlan_filtering 1`);
+      }
+
+      for (const v of (data.veths || [])) {
+        const nsA = data.namespaces.find(n => n.id === v.endA.nsId);
+        const nsB = data.namespaces.find(n => n.id === v.endB.nsId);
+        await execAndLog(`ip link add ${v.endA.name} type veth peer name ${v.endB.name}`);
+        if (nsA) await execAndLog(`ip link set ${v.endA.name} netns ${nsA.name}`);
+        if (nsB) await execAndLog(`ip link set ${v.endB.name} netns ${nsB.name}`);
+        const pA = nsA ? `ip netns exec ${nsA.name}` : "";
+        const pB = nsB ? `ip netns exec ${nsB.name}` : "";
+        if (v.endA.bridge) { const br = (data.bridges || []).find(b => b.id === v.endA.bridge); if (br) await execAndLog(`${pA} ip link set ${v.endA.name} master ${br.name}`); }
+        if (v.endB.bridge) { const br = (data.bridges || []).find(b => b.id === v.endB.bridge); if (br) await execAndLog(`${pB} ip link set ${v.endB.name} master ${br.name}`); }
+        if (v.endA.ip) await execAndLog(`${pA} ip addr add ${v.endA.ip} dev ${v.endA.name}`);
+        if (v.endB.ip) await execAndLog(`${pB} ip addr add ${v.endB.ip} dev ${v.endB.name}`);
+        await execAndLog(`${pA} ip link set ${v.endA.name} up`);
+        await execAndLog(`${pB} ip link set ${v.endB.name} up`);
+      }
+
+      for (const rt of (data.routes || [])) {
+        const ns = data.namespaces.find(n => n.id === rt.nsId);
+        if (!ns) continue;
+        const dev = rt.iface ? ` dev ${rt.iface}` : "";
+        await execAndLog(`ip netns exec ${ns.name} ip route add ${rt.dest} via ${rt.gateway}${dev}`);
+      }
+
+      for (const vl of (data.vlans || [])) {
+        const ns = data.namespaces.find(n => n.id === vl.nsId);
+        if (!ns) continue;
+        const p = `ip netns exec ${ns.name}`;
+        const parentName = vl.parentIface || vl.name.split('.')[0];
+        await execAndLog(`${p} ip link add link ${parentName} name ${vl.name} type vlan id ${vl.vlanId || vl.vid}`);
+        await execAndLog(`${p} ip link set ${vl.name} up`);
+        if (vl.ip) await execAndLog(`${p} ip addr add ${vl.ip} dev ${vl.name}`);
+      }
+
+      for (const bv of (data.bridgeVlans || [])) {
+        const ns = data.namespaces.find(n => n.id === bv.nsId);
+        if (!ns) continue;
+        let cmd = `ip netns exec ${ns.name} bridge vlan add dev ${bv.dev} vid ${bv.vid}`;
+        if (bv.devType === 'self') cmd += ' self';
+        if (bv.pvid) cmd += ' pvid';
+        if (bv.untagged) cmd += ' untagged';
+        await execAndLog(cmd);
+      }
+
+      for (const cmd of (data.commands || [])) {
+        const ns = data.namespaces.find(n => n.id === cmd.nsId);
+        if (!ns) continue;
+        const lines = cmd.cmds.split('\n').filter(l => l.trim());
+        for (const line of lines) {
+          await execAndLog(`ip netns exec ${ns.name} ${line.trim()}`);
+        }
+      }
+      for (const ns of data.namespaces) {
+        if (data.ipForwardMap && data.ipForwardMap[ns.id]) {
+          await execAndLog(`ip netns exec ${ns.name} sysctl -w net.ipv4.ip_forward=1`);
+        }
+      }
+      addExecLog('load', 'Environment rebuilt ✓');
+    }
+
+    if (!Array.isArray(data.commands)) data.commands = [];
+    if (!Array.isArray(data.vlans)) data.vlans = [];
+    setState(data);
+    setIpForwardMap(data.ipForwardMap || {});
+    setTerminalTabs([]); setActiveTermTab(null); setShowTerminal(false);
+  }, [dockerReady, execAndLog, addExecLog]);
 
   const fetchIfaceRuntime = useCallback(async (ifaceName, nsName) => {
     if (!dockerReady) return { ip: "", mac: null };
@@ -816,93 +929,16 @@ export default function NetnsVisualizer() {
   /* ── Save / Load ── */
   const saveTopology = useCallback(async () => {
     if (!isElectron()) return;
-    const r = await window.electronAPI.file.save(state);
+    const r = await window.electronAPI.file.save({ ...state, ipForwardMap });
     if (r.success) addExecLog('save', `Saved to ${r.filePath}`);
-  }, [state, addExecLog]);
+  }, [state, ipForwardMap, addExecLog]);
 
   const loadTopology = useCallback(async () => {
     if (!isElectron()) return;
     const r = await window.electronAPI.file.load();
     if (!r.success) return;
-    const data = r.data;
-
-    if (dockerReady) {
-      addExecLog('load', 'Cleaning current environment...');
-      for (const ns of namespaces) await execAndLog(`ip netns del ${ns.name}`);
-      addExecLog('load', 'Rebuilding from file...');
-
-      for (const ns of data.namespaces) await execAndLog(`ip netns add ${ns.name}`);
-
-      for (const b of data.bridges) {
-        const ns = data.namespaces.find(n => n.id === b.nsId);
-        if (!ns) continue;
-        const p = `ip netns exec ${ns.name}`;
-        await execAndLog(`${p} ip link add ${b.name} type bridge`);
-        await execAndLog(`${p} ip link set ${b.name} up`);
-        if (b.ip) await execAndLog(`${p} ip addr add ${b.ip} dev ${b.name}`);
-        if (b.vlanFiltering) await execAndLog(`${p} ip link set ${b.name} type bridge vlan_filtering 1`);
-      }
-
-      for (const v of data.veths) {
-        const nsA = data.namespaces.find(n => n.id === v.endA.nsId);
-        const nsB = data.namespaces.find(n => n.id === v.endB.nsId);
-        await execAndLog(`ip link add ${v.endA.name} type veth peer name ${v.endB.name}`);
-        if (nsA) await execAndLog(`ip link set ${v.endA.name} netns ${nsA.name}`);
-        if (nsB) await execAndLog(`ip link set ${v.endB.name} netns ${nsB.name}`);
-        const pA = nsA ? `ip netns exec ${nsA.name}` : "";
-        const pB = nsB ? `ip netns exec ${nsB.name}` : "";
-        if (v.endA.bridge) { const br = data.bridges.find(b => b.id === v.endA.bridge); if (br) await execAndLog(`${pA} ip link set ${v.endA.name} master ${br.name}`); }
-        if (v.endB.bridge) { const br = data.bridges.find(b => b.id === v.endB.bridge); if (br) await execAndLog(`${pB} ip link set ${v.endB.name} master ${br.name}`); }
-        if (v.endA.ip) await execAndLog(`${pA} ip addr add ${v.endA.ip} dev ${v.endA.name}`);
-        if (v.endB.ip) await execAndLog(`${pB} ip addr add ${v.endB.ip} dev ${v.endB.name}`);
-        await execAndLog(`${pA} ip link set ${v.endA.name} up`);
-        await execAndLog(`${pB} ip link set ${v.endB.name} up`);
-      }
-
-      for (const rt of data.routes) {
-        const ns = data.namespaces.find(n => n.id === rt.nsId);
-        if (!ns) continue;
-        const dev = rt.iface ? ` dev ${rt.iface}` : "";
-        await execAndLog(`ip netns exec ${ns.name} ip route add ${rt.dest} via ${rt.gateway}${dev}`);
-      }
-      // Rebuild VLANs
-      for (const vl of (data.vlans || [])) {
-        const ns = data.namespaces.find(n => n.id === vl.nsId);
-        if (!ns) continue;
-        const p = `ip netns exec ${ns.name}`;
-        const parentName = vl.name.split('.')[0];
-        await execAndLog(`${p} ip link add link ${parentName} name ${vl.name} type vlan id ${vl.vlanId}`);
-        await execAndLog(`${p} ip link set ${vl.name} up`);
-        if (vl.ip) await execAndLog(`${p} ip addr add ${vl.ip} dev ${vl.name}`);
-      }
-      // Rebuild bridge VLANs
-      for (const bv of (data.bridgeVlans || [])) {
-        const ns = data.namespaces.find(n => n.id === bv.nsId);
-        if (!ns) continue;
-        let cmd = `ip netns exec ${ns.name} bridge vlan add dev ${bv.dev} vid ${bv.vid}`;
-        if (bv.devType === 'self') cmd += ' self';
-        if (bv.pvid) cmd += ' pvid';
-        if (bv.untagged) cmd += ' untagged';
-        await execAndLog(cmd);
-      }
-
-      for (const cmd of (data.commands || [])) {
-        const ns = data.namespaces.find(n => n.id === cmd.nsId);
-        if (!ns) continue;
-        const lines = cmd.cmds.split('\n').filter(l => l.trim());
-        for (const line of lines) {
-          await execAndLog(`ip netns exec ${ns.name} ${line.trim()}`);
-        }
-      }
-      addExecLog('load', 'Environment rebuilt ✓');
-    }
-
-    if (!Array.isArray(data.commands)) data.commands = [];
-    if (!Array.isArray(data.vlans)) data.vlans = [];
-    setState(data);
-    setTerminalTabs([]); setActiveTermTab(null); setShowTerminal(false);
-
-  }, [dockerReady, namespaces, execAndLog, addExecLog]);
+    await applyTopologyData(r.data);
+  }, [applyTopologyData]);
 
   /* ── Drag ── */
   const onMouseDown = useCallback((e, nsId) => {
@@ -1057,8 +1093,17 @@ export default function NetnsVisualizer() {
     const { type, data } = modal;
 
     if (type === "addNs") {
-      if (dockerReady) { const r = await execAndLog(`ip netns add ${data.name}`); if (!r.success) { alert(`Failed: ${r.output}`); return; } }
-      update(s => { const mx = s.namespaces.reduce((m,n) => Math.max(m,n.x), 0); s.namespaces.push({ id: uid(), name: data.name, x: s.namespaces.length === 0 ? 60 : mx + NS_W + 60, y: 80, color: data.color, isDefault: false }); });
+      const nsId = uid();
+      if (dockerReady) {
+        const r = await execAndLog(`ip netns add ${data.name}`);
+        if (!r.success) { alert(`Failed: ${r.output}`); return; }
+        const fwRes = await execAndLog(`ip netns exec ${data.name} cat /proc/sys/net/ipv4/ip_forward`);
+        if (fwRes.success) {
+          const fwVal = (fwRes.output || '').trim() === '1';
+          setIpForwardMap(prev => ({ ...prev, [nsId]: fwVal }));
+        }
+      }
+      update(s => { const mx = s.namespaces.reduce((m,n) => Math.max(m,n.x), 0); s.namespaces.push({ id: nsId, name: data.name, x: s.namespaces.length === 0 ? 60 : mx + NS_W + 60, y: 80, color: data.color, isDefault: false }); });
     } else if (type === "addBridge") {
       const ns = namespaces.find(n => n.id === data.nsId);
       if (dockerReady && ns) {
@@ -1266,6 +1311,14 @@ export default function NetnsVisualizer() {
                       <circle cx={ns.x+18} cy={ns.y+NS_HEADER/2} r={5} fill={ns.color} />
                       <text x={ns.x+32} y={ns.y+NS_HEADER/2+1} dominantBaseline="middle" fontSize={13} fontWeight="700" fill={COLORS.text} fontFamily="'JetBrains Mono', monospace">{ns.name}</text>
                       
+                      {/* ip_forward toggle */}
+                      {dockerReady && (
+                        <g onClick={e => { e.stopPropagation(); toggleIpForward(ns); }} style={{ cursor: "pointer" }}>
+                          <rect x={ns.x+NS_W-142} y={ns.y+10} width={28} height={22} rx={4} fill={ipForwardMap[ns.id] ? (ns.color || COLORS.green)+"20" : COLORS.border} />
+                          <text x={ns.x+NS_W-128} y={ns.y+23} fontSize={10} fill={ipForwardMap[ns.id] ? (ns.color || COLORS.green) : COLORS.textDim} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">FW</text>
+                        </g>
+                      )}
+
                       {/* Route button */}
                       {dockerReady && (
                         <g onClick={e => { e.stopPropagation(); showRouteTable(ns); }} style={{ cursor: "pointer" }}>

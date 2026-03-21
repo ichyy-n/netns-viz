@@ -483,6 +483,7 @@ export default function NetnsVisualizer() {
   const [ipForwardMap, setIpForwardMap] = useState({});
   const [iptablesMap, setIptablesMap] = useState({});
   const [iptablesModal, setIptablesModal] = useState(null);
+  const [vethCtxMenu, setVethCtxMenu] = useState(null);
   const update = useCallback((fn) => setState(prev => { const n = JSON.parse(JSON.stringify(prev)); fn(n); return n; }), []);
   const addExecLog = useCallback((cmd, output, ok = true) => setExecLog(prev => [...prev, { cmd, output, success: ok, time: new Date().toLocaleTimeString() }]), []);
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [execLog]);
@@ -491,6 +492,23 @@ export default function NetnsVisualizer() {
       window.sessionStorage.setItem(GUI_STATE_KEY, JSON.stringify(state));
     } catch {}
   }, [state]);
+
+  const swapVethEnds = useCallback((vethId) => {
+    update(s => {
+      const v = s.veths.find(vv => vv.id === vethId);
+      if (!v) return;
+      const tmp = v.endA;
+      v.endA = v.endB;
+      v.endB = tmp;
+      s.vlans.forEach(vl => {
+        if (vl.parentId === vethId) vl.parentEnd = vl.parentEnd === "endA" ? "endB" : "endA";
+      });
+      s.bridgeVlans.forEach(bv => {
+        if (bv.vethId === vethId) bv.vethEnd = bv.vethEnd === "endA" ? "endB" : "endA";
+      });
+    });
+    setVethCtxMenu(null);
+  }, [update]);
 
   /* ── Docker ── */
   const startDocker = useCallback(async () => {
@@ -1016,7 +1034,7 @@ export default function NetnsVisualizer() {
 
   useEffect(() => {
     if (!dragging) return;
-    const onMove = e => update(s => { const ns = s.namespaces.find(n => n.id === dragging.nsId); if (ns) { ns.x = Math.max(0, e.clientX / zoom - dragging.ox + pan.x / zoom); ns.y = Math.max(0, e.clientY / zoom - dragging.oy + pan.y / zoom); } });
+    const onMove = e => update(s => { const ns = s.namespaces.find(n => n.id === dragging.nsId); if (ns) { ns.x = e.clientX / zoom - dragging.ox + pan.x / zoom; ns.y = e.clientY / zoom - dragging.oy + pan.y / zoom; } });
     const onUp = () => setDragging(null);
     window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
     return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
@@ -1170,7 +1188,7 @@ export default function NetnsVisualizer() {
           setIpForwardMap(prev => ({ ...prev, [nsId]: fwVal }));
         }
       }
-      update(s => { const mx = s.namespaces.reduce((m,n) => Math.max(m,n.x), 0); s.namespaces.push({ id: nsId, name: data.name, x: s.namespaces.length === 0 ? 60 : mx + NS_W + 60, y: 80, color: data.color, isDefault: false }); });
+      update(s => { const mx = s.namespaces.reduce((m,n) => Math.max(m,n.x), 0); s.namespaces.push({ id: nsId, name: data.name, x: s.namespaces.length === 0 ? 150 : mx + NS_W + 60, y: 200, color: data.color, isDefault: false }); });
     } else if (type === "addBridge") {
       const ns = namespaces.find(n => n.id === data.nsId);
       if (dockerReady && ns) {
@@ -1345,7 +1363,7 @@ export default function NetnsVisualizer() {
 
           {/* ── Canvas ── */}
           <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
-            <svg ref={svgRef} width="100%" height="100%" style={{ cursor: panning ? "grabbing" : "grab" }} onMouseDown={onBgMouseDown} onWheel={onWheel}>
+            <svg ref={svgRef} width="100%" height="100%" style={{ cursor: panning ? "grabbing" : "grab" }} onMouseDown={e => { setVethCtxMenu(null); onBgMouseDown(e); }} onWheel={onWheel}>
               <rect width="100%" height="100%" fill={COLORS.bg} />
               <defs><pattern id="grid" width={40*zoom} height={40*zoom} patternUnits="userSpaceOnUse" x={pan.x%(40*zoom)} y={pan.y%(40*zoom)}><circle cx={1} cy={1} r={0.5} fill="#1e293b" /></pattern></defs>
               <rect width="100%" height="100%" fill="url(#grid)" />
@@ -1357,11 +1375,13 @@ export default function NetnsVisualizer() {
                   if (!pA || !pB) return null;
                   const cp1x = pA.side === "right" ? pA.x+80 : pA.x-80;
                   const cp2x = pB.side === "left" ? pB.x-80 : pB.x+80;
+                  const onVethCtx = (e) => { e.preventDefault(); e.stopPropagation(); setVethCtxMenu({ vethId: v.id, x: e.clientX, y: e.clientY, name: v.name }); };
                   return (
                     <g key={v.id}>
-                      <path d={`M${pA.x},${pA.y} C${cp1x},${pA.y} ${cp2x},${pB.y} ${pB.x},${pB.y}`} stroke={COLORS.orange} strokeWidth={2} fill="none" strokeDasharray="6 4" opacity={0.6} />
+                      <path d={`M${pA.x},${pA.y} C${cp1x},${pA.y} ${cp2x},${pB.y} ${pB.x},${pB.y}`} stroke="transparent" strokeWidth={12} fill="none" style={{ cursor: "context-menu" }} onContextMenu={onVethCtx} />
+                      <path d={`M${pA.x},${pA.y} C${cp1x},${pA.y} ${cp2x},${pB.y} ${pB.x},${pB.y}`} stroke={COLORS.orange} strokeWidth={2} fill="none" strokeDasharray="6 4" opacity={0.6} style={{ pointerEvents: "none" }} />
                       <circle cx={pA.x} cy={pA.y} r={4} fill={COLORS.orange} /><circle cx={pB.x} cy={pB.y} r={4} fill={COLORS.orange} />
-                      <text x={(pA.x+pB.x)/2} y={Math.min(pA.y,pB.y)-10} textAnchor="middle" fontSize={9} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace">{v.name}</text>
+                      <text x={(pA.x+pB.x)/2} y={Math.min(pA.y,pB.y)-10} textAnchor="middle" fontSize={9} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace" style={{ cursor: "context-menu" }} onContextMenu={onVethCtx}>{v.name}</text>
                     </g>);
                 })}
 
@@ -1515,6 +1535,17 @@ export default function NetnsVisualizer() {
                 )}
               </g>
             </svg>
+
+            {vethCtxMenu && (
+              <div style={{ position: "fixed", left: vethCtxMenu.x, top: vethCtxMenu.y, zIndex: 9999, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: 4, boxShadow: "0 4px 12px rgba(0,0,0,0.5)", fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}
+                onClick={e => e.stopPropagation()}>
+                <div style={{ padding: "6px 12px", color: COLORS.textMuted, fontSize: 10, borderBottom: `1px solid ${COLORS.border}` }}>{vethCtxMenu.name}</div>
+                <div style={{ padding: "6px 12px", color: COLORS.text, cursor: "pointer", borderRadius: 4 }}
+                  onMouseEnter={e => e.currentTarget.style.background = COLORS.surfaceHover}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                  onClick={() => swapVethEnds(vethCtxMenu.vethId)}>EndA/EndBを入れ替え</div>
+              </div>
+            )}
 
             {/*<div style={{ position: "absolute", bottom: 16, right: 16, fontSize: 10, color: COLORS.textDim, fontFamily: "'JetBrains Mono', monospace", background: COLORS.surface+"cc", padding: "6px 10px", borderRadius: 6, border: `1px solid ${COLORS.border}` }}>
               ドラッグ: ノード移動 · 背景ドラッグ: パン · スクロール: ズーム

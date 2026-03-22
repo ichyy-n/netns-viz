@@ -22,6 +22,30 @@ const CHAIN_OPTIONS = {
   raw: ['PREROUTING', 'OUTPUT']
 };
 
+// Enrich bridgeVlans entries with vethId/vethEnd/bridgeId if missing (older save format compatibility)
+const enrichBridgeVlans = (bridgeVlans, veths, bridges = []) => {
+  for (const bv of bridgeVlans) {
+    if (!bv.vethId || !bv.vethEnd) {
+      for (const v of veths) {
+        for (const end of ['endA', 'endB']) {
+          if (v[end].name === bv.dev && v[end].nsId === bv.nsId) {
+            bv.vethId = v.id;
+            bv.vethEnd = end;
+            if (!bv.bridgeId && v[end].bridge) bv.bridgeId = v[end].bridge;
+            break;
+          }
+        }
+        if (bv.vethId) break;
+      }
+    }
+    if (!bv.bridgeId) {
+      // Fallback: find bridge in the same namespace
+      const br = bridges.find(b => b.nsId === bv.nsId);
+      if (br) bv.bridgeId = br.id;
+    }
+  }
+};
+
 const loadGuiState = () => {
   if (typeof window === "undefined") return defaultState();
   try {
@@ -35,6 +59,7 @@ const loadGuiState = () => {
     if (!Array.isArray(parsed.commands)) parsed.commands = [];
     if (!Array.isArray(parsed.vlans)) parsed.vlans = [];
     if (!Array.isArray(parsed.bridgeVlans)) parsed.bridgeVlans = [];
+    enrichBridgeVlans(parsed.bridgeVlans, parsed.veths, parsed.bridges);
     return parsed;
   } catch {
     return defaultState();
@@ -552,6 +577,17 @@ export default function NetnsVisualizer() {
           await window.electronAPI.docker.exec(`ip netns exec ${ns.name} iptables -t ${rule.table} -A ${rule.chain}${extraPart} -j ${rule.target}`);
         }
       }
+
+      // bridgeVlans: Reactステートから再適用（resume後はbridge vlan設定が消えているため）
+      for (const bv of bridgeVlans) {
+        const ns = namespaces.find(n => n.id === bv.nsId);
+        if (!ns) continue;
+        let cmd = `ip netns exec ${ns.name} bridge vlan add dev ${bv.dev} vid ${bv.vid}`;
+        if (bv.devType === 'self') cmd += ' self';
+        if (bv.pvid) cmd += ' pvid';
+        if (bv.untagged) cmd += ' untagged';
+        await window.electronAPI.docker.exec(cmd);
+      }
     };
     syncOnResume();
   }, [dockerReady]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -708,6 +744,8 @@ export default function NetnsVisualizer() {
 
     if (!Array.isArray(data.commands)) data.commands = [];
     if (!Array.isArray(data.vlans)) data.vlans = [];
+    if (!Array.isArray(data.bridgeVlans)) data.bridgeVlans = [];
+    enrichBridgeVlans(data.bridgeVlans, data.veths || [], data.bridges || []);
     setState(data);
     setIpForwardMap(prev => ({ ...prev, ...(data.ipForwardMap || {}), ...fwResult }));
     setIptablesMap(data.iptablesMap || {});

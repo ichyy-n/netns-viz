@@ -598,6 +598,8 @@ export default function NetnsVisualizer() {
 
   // Shared: clean existing env → rebuild from data → update GUI state
   const applyTopologyData = useCallback(async (data) => {
+    setExecLog([]);
+    let fwResult = {};
     if (dockerReady) {
       addExecLog('load', 'Cleaning current environment...');
       const listResult = await window.electronAPI.docker.exec('ip netns list');
@@ -690,23 +692,24 @@ export default function NetnsVisualizer() {
         }
       }
       addExecLog('load', 'Environment rebuilt ✓');
-    }
 
-    // Read actual Linux ip_forward state for all namespaces
-    const fwUpdates = {};
-    for (const ns of data.namespaces) {
-      const fwRes = await window.electronAPI.docker.exec(
-        `ip netns exec ${ns.name} cat /proc/sys/net/ipv4/ip_forward`
-      );
-      if (fwRes.success) {
-        fwUpdates[ns.id] = (fwRes.output || '').trim() === '1';
+      // Read actual Linux ip_forward state for all namespaces
+      const fwUpdates = {};
+      for (const ns of data.namespaces) {
+        const fwRes = await window.electronAPI.docker.exec(
+          `ip netns exec ${ns.name} cat /proc/sys/net/ipv4/ip_forward`
+        );
+        if (fwRes.success) {
+          fwUpdates[ns.id] = (fwRes.output || '').trim() === '1';
+        }
       }
+      fwResult = fwUpdates;
     }
 
     if (!Array.isArray(data.commands)) data.commands = [];
     if (!Array.isArray(data.vlans)) data.vlans = [];
     setState(data);
-    setIpForwardMap(prev => ({ ...prev, ...(data.ipForwardMap || {}), ...fwUpdates }));
+    setIpForwardMap(prev => ({ ...prev, ...(data.ipForwardMap || {}), ...fwResult }));
     setIptablesMap(data.iptablesMap || {});
     setTerminalTabs([]); setActiveTermTab(null); setShowTerminal(false);
   }, [dockerReady, execAndLog, addExecLog]);
@@ -749,11 +752,10 @@ export default function NetnsVisualizer() {
   }, [dockerReady, veths, namespaces, fetchIfaceRuntime]);
 
   useEffect(() => {
-    if (!dockerReady || !veths.length) return;
-    syncVethRuntime();
+    if (!dockerReady) return;
     const timer = setInterval(syncVethRuntime, 2000);
     return () => clearInterval(timer);
-  }, [dockerReady, veths, syncVethRuntime]);
+  }, [dockerReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── Terminal tabs ── */
   const openTerminal = useCallback((ns) => {

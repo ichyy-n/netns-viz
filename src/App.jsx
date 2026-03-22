@@ -681,10 +681,21 @@ export default function NetnsVisualizer() {
       addExecLog('load', 'Environment rebuilt ✓');
     }
 
+    // Read actual Linux ip_forward state for all namespaces
+    const fwUpdates = {};
+    for (const ns of data.namespaces) {
+      const fwRes = await window.electronAPI.docker.exec(
+        `ip netns exec ${ns.name} cat /proc/sys/net/ipv4/ip_forward`
+      );
+      if (fwRes.success) {
+        fwUpdates[ns.id] = (fwRes.output || '').trim() === '1';
+      }
+    }
+
     if (!Array.isArray(data.commands)) data.commands = [];
     if (!Array.isArray(data.vlans)) data.vlans = [];
     setState(data);
-    setIpForwardMap(data.ipForwardMap || {});
+    setIpForwardMap(prev => ({ ...prev, ...(data.ipForwardMap || {}), ...fwUpdates }));
     setIptablesMap(data.iptablesMap || {});
     setTerminalTabs([]); setActiveTermTab(null); setShowTerminal(false);
   }, [dockerReady, execAndLog, addExecLog]);

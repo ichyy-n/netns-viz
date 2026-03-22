@@ -22,23 +22,6 @@ const CHAIN_OPTIONS = {
   raw: ['PREROUTING', 'OUTPUT']
 };
 
-// Enrich bridgeVlans entries with vethId/vethEnd if missing (older save format compatibility)
-const enrichBridgeVlans = (bridgeVlans, veths) => {
-  for (const bv of bridgeVlans) {
-    if (bv.vethId && bv.vethEnd) continue;
-    for (const v of veths) {
-      for (const end of ['endA', 'endB']) {
-        if (v[end].name === bv.dev && v[end].nsId === bv.nsId) {
-          bv.vethId = v.id;
-          bv.vethEnd = end;
-          break;
-        }
-      }
-      if (bv.vethId) break;
-    }
-  }
-};
-
 const loadGuiState = () => {
   if (typeof window === "undefined") return defaultState();
   try {
@@ -52,7 +35,6 @@ const loadGuiState = () => {
     if (!Array.isArray(parsed.commands)) parsed.commands = [];
     if (!Array.isArray(parsed.vlans)) parsed.vlans = [];
     if (!Array.isArray(parsed.bridgeVlans)) parsed.bridgeVlans = [];
-    enrichBridgeVlans(parsed.bridgeVlans, parsed.veths);
     return parsed;
   } catch {
     return defaultState();
@@ -501,7 +483,6 @@ export default function NetnsVisualizer() {
   const [ipForwardMap, setIpForwardMap] = useState({});
   const [iptablesMap, setIptablesMap] = useState({});
   const [iptablesModal, setIptablesModal] = useState(null);
-
   const update = useCallback((fn) => setState(prev => { const n = JSON.parse(JSON.stringify(prev)); fn(n); return n; }), []);
   const addExecLog = useCallback((cmd, output, ok = true) => setExecLog(prev => [...prev, { cmd, output, success: ok, time: new Date().toLocaleTimeString() }]), []);
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [execLog]);
@@ -559,17 +540,6 @@ export default function NetnsVisualizer() {
           const extraPart = rule.extra ? ` ${rule.extra}` : '';
           await window.electronAPI.docker.exec(`ip netns exec ${ns.name} iptables -t ${rule.table} -A ${rule.chain}${extraPart} -j ${rule.target}`);
         }
-      }
-
-      // bridgeVlans: Reactステートから再適用（resume後はbridge vlan設定が消えているため）
-      for (const bv of bridgeVlans) {
-        const ns = namespaces.find(n => n.id === bv.nsId);
-        if (!ns) continue;
-        let cmd = `ip netns exec ${ns.name} bridge vlan add dev ${bv.dev} vid ${bv.vid}`;
-        if (bv.devType === 'self') cmd += ' self';
-        if (bv.pvid) cmd += ' pvid';
-        if (bv.untagged) cmd += ' untagged';
-        await window.electronAPI.docker.exec(cmd);
       }
     };
     syncOnResume();
@@ -711,12 +681,21 @@ export default function NetnsVisualizer() {
       addExecLog('load', 'Environment rebuilt ✓');
     }
 
+    // Read actual Linux ip_forward state for all namespaces
+    const fwUpdates = {};
+    for (const ns of data.namespaces) {
+      const fwRes = await window.electronAPI.docker.exec(
+        `ip netns exec ${ns.name} cat /proc/sys/net/ipv4/ip_forward`
+      );
+      if (fwRes.success) {
+        fwUpdates[ns.id] = (fwRes.output || '').trim() === '1';
+      }
+    }
+
     if (!Array.isArray(data.commands)) data.commands = [];
     if (!Array.isArray(data.vlans)) data.vlans = [];
-    if (!Array.isArray(data.bridgeVlans)) data.bridgeVlans = [];
-    enrichBridgeVlans(data.bridgeVlans, data.veths || []);
     setState(data);
-    setIpForwardMap(data.ipForwardMap || {});
+    setIpForwardMap(prev => ({ ...prev, ...(data.ipForwardMap || {}), ...fwUpdates }));
     setIptablesMap(data.iptablesMap || {});
     setTerminalTabs([]); setActiveTermTab(null); setShowTerminal(false);
   }, [dockerReady, execAndLog, addExecLog]);
@@ -1048,7 +1027,7 @@ export default function NetnsVisualizer() {
 
   useEffect(() => {
     if (!dragging) return;
-    const onMove = e => update(s => { const ns = s.namespaces.find(n => n.id === dragging.nsId); if (ns) { ns.x = e.clientX / zoom - dragging.ox + pan.x / zoom; ns.y = e.clientY / zoom - dragging.oy + pan.y / zoom; } });
+    const onMove = e => update(s => { const ns = s.namespaces.find(n => n.id === dragging.nsId); if (ns) { ns.x = Math.max(0, e.clientX / zoom - dragging.ox + pan.x / zoom); ns.y = Math.max(0, e.clientY / zoom - dragging.oy + pan.y / zoom); } });
     const onUp = () => setDragging(null);
     window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
     return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
@@ -1202,7 +1181,7 @@ export default function NetnsVisualizer() {
           setIpForwardMap(prev => ({ ...prev, [nsId]: fwVal }));
         }
       }
-      update(s => { const mx = s.namespaces.reduce((m,n) => Math.max(m,n.x), 0); s.namespaces.push({ id: nsId, name: data.name, x: s.namespaces.length === 0 ? 150 : mx + NS_W + 60, y: 200, color: data.color, isDefault: false }); });
+      update(s => { const mx = s.namespaces.reduce((m,n) => Math.max(m,n.x), 0); s.namespaces.push({ id: nsId, name: data.name, x: s.namespaces.length === 0 ? 60 : mx + NS_W + 60, y: 80, color: data.color, isDefault: false }); });
     } else if (type === "addBridge") {
       const ns = namespaces.find(n => n.id === data.nsId);
       if (dockerReady && ns) {
@@ -1377,7 +1356,7 @@ export default function NetnsVisualizer() {
 
           {/* ── Canvas ── */}
           <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
-            <svg ref={svgRef} width="100%" height="100%" style={{ cursor: panning ? "grabbing" : "grab" }} onMouseDown={e => { onBgMouseDown(e); }} onWheel={onWheel}>
+            <svg ref={svgRef} width="100%" height="100%" style={{ cursor: panning ? "grabbing" : "grab" }} onMouseDown={onBgMouseDown} onWheel={onWheel}>
               <rect width="100%" height="100%" fill={COLORS.bg} />
               <defs><pattern id="grid" width={40*zoom} height={40*zoom} patternUnits="userSpaceOnUse" x={pan.x%(40*zoom)} y={pan.y%(40*zoom)}><circle cx={1} cy={1} r={0.5} fill="#1e293b" /></pattern></defs>
               <rect width="100%" height="100%" fill="url(#grid)" />
@@ -1391,8 +1370,7 @@ export default function NetnsVisualizer() {
                   const cp2x = pB.side === "left" ? pB.x-80 : pB.x+80;
                   return (
                     <g key={v.id}>
-                      <path d={`M${pA.x},${pA.y} C${cp1x},${pA.y} ${cp2x},${pB.y} ${pB.x},${pB.y}`} stroke="transparent" strokeWidth={12} fill="none" />
-                      <path d={`M${pA.x},${pA.y} C${cp1x},${pA.y} ${cp2x},${pB.y} ${pB.x},${pB.y}`} stroke={COLORS.orange} strokeWidth={2} fill="none" strokeDasharray="6 4" opacity={0.6} style={{ pointerEvents: "none" }} />
+                      <path d={`M${pA.x},${pA.y} C${cp1x},${pA.y} ${cp2x},${pB.y} ${pB.x},${pB.y}`} stroke={COLORS.orange} strokeWidth={2} fill="none" strokeDasharray="6 4" opacity={0.6} />
                       <circle cx={pA.x} cy={pA.y} r={4} fill={COLORS.orange} /><circle cx={pB.x} cy={pB.y} r={4} fill={COLORS.orange} />
                       <text x={(pA.x+pB.x)/2} y={Math.min(pA.y,pB.y)-10} textAnchor="middle" fontSize={9} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace">{v.name}</text>
                     </g>);
@@ -1548,8 +1526,6 @@ export default function NetnsVisualizer() {
                 )}
               </g>
             </svg>
-
-
 
             {/*<div style={{ position: "absolute", bottom: 16, right: 16, fontSize: 10, color: COLORS.textDim, fontFamily: "'JetBrains Mono', monospace", background: COLORS.surface+"cc", padding: "6px 10px", borderRadius: 6, border: `1px solid ${COLORS.border}` }}>
               ドラッグ: ノード移動 · 背景ドラッグ: パン · スクロール: ズーム

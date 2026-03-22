@@ -437,8 +437,10 @@ function getInterfacePositions(namespaces, bridges, veths, vlans = []) {
       pos[b.id] = { x: ns.x + NS_W, y: ns.y + NS_HEADER + idx * NS_ITEM_H + NS_ITEM_H / 2, side: "right" }; idx++;
     });
     veths.forEach(v => {
-      if (v.endA.nsId === ns.id) { pos[v.endA.id] = { x: ns.x + NS_W, y: ns.y + NS_HEADER + idx * NS_ITEM_H + NS_ITEM_H / 2, side: "right" }; idx++; }
-      if (v.endB.nsId === ns.id) { pos[v.endB.id] = { x: ns.x, y: ns.y + NS_HEADER + idx * NS_ITEM_H + NS_ITEM_H / 2, side: "left" }; idx++; }
+      const sideA = v.swapped ? "left" : "right";
+      const sideB = v.swapped ? "right" : "left";
+      if (v.endA.nsId === ns.id) { pos[v.endA.id] = { x: sideA === "right" ? ns.x + NS_W : ns.x, y: ns.y + NS_HEADER + idx * NS_ITEM_H + NS_ITEM_H / 2, side: sideA }; idx++; }
+      if (v.endB.nsId === ns.id) { pos[v.endB.id] = { x: sideB === "left" ? ns.x : ns.x + NS_W, y: ns.y + NS_HEADER + idx * NS_ITEM_H + NS_ITEM_H / 2, side: sideB }; idx++; }
     });
     vlans.filter(vl => vl.nsId === ns.id).forEach(vl => {
       pos[vl.id] = { x: ns.x + NS_W, y: ns.y + NS_HEADER + idx * NS_ITEM_H + NS_ITEM_H / 2, side: "right" }; idx++;
@@ -476,6 +478,7 @@ export default function NetnsVisualizer() {
   const [ifaceModal, setIfaceModal] = useState(null);
   const [vlanModal, setVlanModal] = useState(null);
   const [bridgeVlanModal, setBridgeVlanModal] = useState(null);
+  const [vethCtxMenu, setVethCtxMenu] = useState(null);
   const logEndRef = useRef(null);
 
   const { namespaces, bridges, veths, vlans, bridgeVlans, routes, commands } = state;
@@ -484,6 +487,14 @@ export default function NetnsVisualizer() {
   const [iptablesMap, setIptablesMap] = useState({});
   const [iptablesModal, setIptablesModal] = useState(null);
   const update = useCallback((fn) => setState(prev => { const n = JSON.parse(JSON.stringify(prev)); fn(n); return n; }), []);
+  const swapVethEnds = useCallback((vethId) => {
+    update(s => {
+      const v = s.veths.find(vv => vv.id === vethId);
+      if (!v) return;
+      v.swapped = !v.swapped;
+    });
+    setVethCtxMenu(null);
+  }, [update]);
   const addExecLog = useCallback((cmd, output, ok = true) => setExecLog(prev => [...prev, { cmd, output, success: ok, time: new Date().toLocaleTimeString() }]), []);
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [execLog]);
   useEffect(() => {
@@ -1209,7 +1220,8 @@ export default function NetnsVisualizer() {
       }
       update(s => s.veths.push({ id: uid(), name: data.name,
         endA: { id: uid(), name: data.endAName, nsId: data.endANs, ip: data.endAIp, mac: data.endAMac||null, bridge: data.endABridge||null },
-        endB: { id: uid(), name: data.endBName, nsId: data.endBNs, ip: data.endBIp, mac: data.endBMac||null, bridge: data.endBBridge||null }
+        endB: { id: uid(), name: data.endBName, nsId: data.endBNs, ip: data.endBIp, mac: data.endBMac||null, bridge: data.endBBridge||null },
+        swapped: false
       }));
     } else if (type === "addRoute") {
       const ns = namespaces.find(n => n.id === data.nsId);
@@ -1356,7 +1368,7 @@ export default function NetnsVisualizer() {
 
           {/* ── Canvas ── */}
           <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
-            <svg ref={svgRef} width="100%" height="100%" style={{ cursor: panning ? "grabbing" : "grab" }} onMouseDown={onBgMouseDown} onWheel={onWheel}>
+            <svg ref={svgRef} width="100%" height="100%" style={{ cursor: panning ? "grabbing" : "grab" }} onMouseDown={e => { setVethCtxMenu(null); onBgMouseDown(e); }} onWheel={onWheel}>
               <rect width="100%" height="100%" fill={COLORS.bg} />
               <defs><pattern id="grid" width={40*zoom} height={40*zoom} patternUnits="userSpaceOnUse" x={pan.x%(40*zoom)} y={pan.y%(40*zoom)}><circle cx={1} cy={1} r={0.5} fill="#1e293b" /></pattern></defs>
               <rect width="100%" height="100%" fill="url(#grid)" />
@@ -1369,8 +1381,9 @@ export default function NetnsVisualizer() {
                   const cp1x = pA.side === "right" ? pA.x+80 : pA.x-80;
                   const cp2x = pB.side === "left" ? pB.x-80 : pB.x+80;
                   return (
-                    <g key={v.id}>
+                    <g key={v.id} onContextMenu={e => { e.preventDefault(); setVethCtxMenu({ vethId: v.id, x: e.clientX, y: e.clientY }); }}>
                       <path d={`M${pA.x},${pA.y} C${cp1x},${pA.y} ${cp2x},${pB.y} ${pB.x},${pB.y}`} stroke={COLORS.orange} strokeWidth={2} fill="none" strokeDasharray="6 4" opacity={0.6} />
+                      <path d={`M${pA.x},${pA.y} C${cp1x},${pA.y} ${cp2x},${pB.y} ${pB.x},${pB.y}`} stroke="transparent" strokeWidth={12} fill="none" />
                       <circle cx={pA.x} cy={pA.y} r={4} fill={COLORS.orange} /><circle cx={pB.x} cy={pB.y} r={4} fill={COLORS.orange} />
                       <text x={(pA.x+pB.x)/2} y={Math.min(pA.y,pB.y)-10} textAnchor="middle" fontSize={9} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace">{v.name}</text>
                     </g>);
@@ -1526,6 +1539,19 @@ export default function NetnsVisualizer() {
                 )}
               </g>
             </svg>
+
+            {/* Veth context menu */}
+            {vethCtxMenu && (
+              <div style={{ position: "fixed", left: vethCtxMenu.x, top: vethCtxMenu.y, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: 4, zIndex: 9999, boxShadow: "0 4px 12px rgba(0,0,0,0.4)" }}
+                onClick={() => setVethCtxMenu(null)}>
+                <div style={{ padding: "6px 16px", cursor: "pointer", fontSize: 12, color: COLORS.text, fontFamily: "'JetBrains Mono', monospace", borderRadius: 4 }}
+                  onMouseEnter={e => e.currentTarget.style.background = COLORS.border}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                  onClick={() => swapVethEnds(vethCtxMenu.vethId)}>
+                  接続線の左右を入れ替え
+                </div>
+              </div>
+            )}
 
             {/*<div style={{ position: "absolute", bottom: 16, right: 16, fontSize: 10, color: COLORS.textDim, fontFamily: "'JetBrains Mono', monospace", background: COLORS.surface+"cc", padding: "6px 10px", borderRadius: 6, border: `1px solid ${COLORS.border}` }}>
               ドラッグ: ノード移動 · 背景ドラッグ: パン · スクロール: ズーム

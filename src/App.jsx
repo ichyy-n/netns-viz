@@ -1078,7 +1078,7 @@ export default function NetnsVisualizer() {
 
   useEffect(() => {
     if (!dragging) return;
-    const onMove = e => update(s => { const ns = s.namespaces.find(n => n.id === dragging.nsId); if (ns) { ns.x = Math.max(0, e.clientX / zoom - dragging.ox + pan.x / zoom); ns.y = Math.max(0, e.clientY / zoom - dragging.oy + pan.y / zoom); } });
+    const onMove = e => update(s => { const ns = s.namespaces.find(n => n.id === dragging.nsId); if (ns) { ns.x = e.clientX / zoom - dragging.ox + pan.x / zoom; ns.y = e.clientY / zoom - dragging.oy + pan.y / zoom; } });
     const onUp = () => setDragging(null);
     window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
     return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
@@ -1232,7 +1232,7 @@ export default function NetnsVisualizer() {
           setIpForwardMap(prev => ({ ...prev, [nsId]: fwVal }));
         }
       }
-      update(s => { const mx = s.namespaces.reduce((m,n) => Math.max(m,n.x), 0); s.namespaces.push({ id: nsId, name: data.name, x: s.namespaces.length === 0 ? 60 : mx + NS_W + 60, y: 80, color: data.color, isDefault: false }); });
+      update(s => { const mx = s.namespaces.reduce((m,n) => Math.max(m,n.x), 0); s.namespaces.push({ id: nsId, name: data.name, x: s.namespaces.length === 0 ? 150 : mx + NS_W + 60, y: 200, color: data.color, isDefault: false }); });
     } else if (type === "addBridge") {
       const ns = namespaces.find(n => n.id === data.nsId);
       if (dockerReady && ns) {

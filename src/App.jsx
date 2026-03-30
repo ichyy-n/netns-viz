@@ -476,6 +476,10 @@ function getInterfacePositions(namespaces, bridges, veths, vlans = []) {
 
 const isElectron = () => Boolean(window.electronAPI);
 
+const CIDR_RE = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}$/;
+const validateCidr = (ip) => !ip || CIDR_RE.test(ip);
+const CIDR_ERROR_MSG = 'IPアドレスにはCIDR表記（例: /24）を含めてください';
+
 /* ══════════════════════════════════════════════
    MAIN APP
    ══════════════════════════════════════════════ */
@@ -968,6 +972,7 @@ export default function NetnsVisualizer() {
   const confirmVlan = useCallback(async () => {
     if (!vlanModal) return;
     const { vethId, end, ifaceName, nsId, vlanId: vidStr, ip, removeParentIp } = vlanModal;
+    if (!validateCidr(ip)) { alert(CIDR_ERROR_MSG); return; }
     const vid = parseInt(vidStr, 10);
     if (!vid || vid < 1 || vid > 4094) return;
     const ns = namespaces.find(n => n.id === nsId);
@@ -1026,6 +1031,7 @@ export default function NetnsVisualizer() {
   const changeIface = useCallback(async () => {
     if (!ifaceModal) return;
     const { nsName, ifaceName, newIp, newMac, vethId, end } = ifaceModal;
+    if (!validateCidr(newIp)) { alert(CIDR_ERROR_MSG); return; }
     if (newMac && dockerReady) {
       await execAndLog(`ip netns exec ${nsName} ip link set ${ifaceName} down`);
       await execAndLog(`ip netns exec ${nsName} ip link set dev ${ifaceName} address ${newMac}`);
@@ -1234,6 +1240,7 @@ export default function NetnsVisualizer() {
       }
       update(s => { const mx = s.namespaces.reduce((m,n) => Math.max(m,n.x), 0); s.namespaces.push({ id: nsId, name: data.name, x: s.namespaces.length === 0 ? 150 : mx + NS_W + 60, y: 200, color: data.color, isDefault: false }); });
     } else if (type === "addBridge") {
+      if (!validateCidr(data.ip)) { alert(CIDR_ERROR_MSG); return; }
       const ns = namespaces.find(n => n.id === data.nsId);
       if (dockerReady && ns) {
         const p = `ip netns exec ${ns.name}`;
@@ -1243,6 +1250,7 @@ export default function NetnsVisualizer() {
       }
       update(s => s.bridges.push({ id: uid(), name: data.name, nsId: data.nsId, ip: data.ip, vlanFiltering: false }));
     } else if (type === "addVeth") {
+      if (!validateCidr(data.endAIp) || !validateCidr(data.endBIp)) { alert(CIDR_ERROR_MSG); return; }
       if (dockerReady) {
         const nsA = namespaces.find(n => n.id === data.endANs), nsB = namespaces.find(n => n.id === data.endBNs);
         let r = await execAndLog(`ip link add ${data.endAName} type veth peer name ${data.endBName}`); if (!r.success) { alert(`Failed: ${r.output}`); return; }

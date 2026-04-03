@@ -504,6 +504,8 @@ export default function NetnsVisualizer() {
   const [execLog, setExecLog] = useState([]);
   const [showLog, setShowLog] = useState(false);
   const [routeModal, setRouteModal] = useState(null);
+  const [macTableModal, setMacTableModal] = useState(null);
+  const [arpTableModal, setArpTableModal] = useState(null);
   const [ifaceModal, setIfaceModal] = useState(null);
   const [vlanModal, setVlanModal] = useState(null);
   const [bridgeVlanModal, setBridgeVlanModal] = useState(null);
@@ -1002,6 +1004,20 @@ export default function NetnsVisualizer() {
     setRouteModal({ nsId: ns.id, nsName: ns.name, nsColor: ns.color, routes: r.success ? r.output : 'Failed to fetch routes' });
   }, [dockerReady]);
 
+  const showMacTable = useCallback(async (ns) => {
+    if (!dockerReady) return;
+    const br = bridges.find(b => b.nsId === ns.id);
+    if (!br) return;
+    const r = await window.electronAPI.docker.exec(`ip netns exec ${ns.name} bridge fdb show br ${br.name}`);
+    setMacTableModal({ nsId: ns.id, nsName: ns.name, nsColor: ns.color, entries: r.success ? r.output : 'Failed to fetch MAC table' });
+  }, [dockerReady, bridges]);
+
+  const showArpTable = useCallback(async (ns) => {
+    if (!dockerReady) return;
+    const r = await window.electronAPI.docker.exec(`ip netns exec ${ns.name} ip neigh show`);
+    setArpTableModal({ nsId: ns.id, nsName: ns.name, nsColor: ns.color, entries: r.success ? r.output : 'Failed to fetch ARP table' });
+  }, [dockerReady]);
+
   const showIptables = useCallback((ns) => {
     setIptablesModal({
       nsId: ns.id,
@@ -1460,6 +1476,22 @@ export default function NetnsVisualizer() {
                         </g>
                       )}
 
+                      {/* MAC table button (bridge namespaces only) */}
+                      {dockerReady && bridges.some(b => b.nsId === ns.id) && (
+                        <g onClick={e => { e.stopPropagation(); showMacTable(ns); }} style={{ cursor: "pointer" }}>
+                          <rect x={ns.x+NS_W-198} y={ns.y+10} width={28} height={22} rx={4} fill={ns.color+"20"} />
+                          <text x={ns.x+NS_W-184} y={ns.y+23} fontSize={9} fill={ns.color} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">MAC</text>
+                        </g>
+                      )}
+
+                      {/* ARP table button */}
+                      {dockerReady && (
+                        <g onClick={e => { e.stopPropagation(); showArpTable(ns); }} style={{ cursor: "pointer" }}>
+                          <rect x={ns.x+NS_W-168} y={ns.y+10} width={28} height={22} rx={4} fill={ns.color+"20"} />
+                          <text x={ns.x+NS_W-154} y={ns.y+23} fontSize={9} fill={ns.color} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">ARP</text>
+                        </g>
+                      )}
+
                       {/* ip_forward toggle */}
                       {dockerReady && (
                         <g onClick={e => { e.stopPropagation(); toggleIpForward(ns); }} style={{ cursor: "pointer" }}>
@@ -1756,6 +1788,30 @@ export default function NetnsVisualizer() {
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
             <Btn small ghost onClick={() => showRouteTable({ id: routeModal.nsId, name: routeModal.nsName })}>🔄 更新</Btn>
             <Btn small ghost onClick={() => setRouteModal(null)}>閉じる</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {macTableModal && (
+        <Modal title={`MAC Table: ${macTableModal.nsName}`} onClose={() => setMacTableModal(null)} width={500}>
+          <pre style={{ background: COLORS.bg, color: COLORS.green, padding: 16, borderRadius: 8, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.7, border: `1px solid ${COLORS.border}`, whiteSpace: "pre-wrap", maxHeight: 300, overflow: "auto" }}>
+            {macTableModal.entries || '(empty)'}
+          </pre>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+            <Btn small ghost onClick={() => showMacTable({ id: macTableModal.nsId, name: macTableModal.nsName, color: macTableModal.nsColor })}>🔄 更新</Btn>
+            <Btn small ghost onClick={() => setMacTableModal(null)}>閉じる</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {arpTableModal && (
+        <Modal title={`ARP Table: ${arpTableModal.nsName}`} onClose={() => setArpTableModal(null)} width={500}>
+          <pre style={{ background: COLORS.bg, color: COLORS.green, padding: 16, borderRadius: 8, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.7, border: `1px solid ${COLORS.border}`, whiteSpace: "pre-wrap", maxHeight: 300, overflow: "auto" }}>
+            {arpTableModal.entries || '(empty)'}
+          </pre>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+            <Btn small ghost onClick={() => showArpTable({ id: arpTableModal.nsId, name: arpTableModal.nsName })}>🔄 更新</Btn>
+            <Btn small ghost onClick={() => setArpTableModal(null)}>閉じる</Btn>
           </div>
         </Modal>
       )}

@@ -1466,45 +1466,45 @@ export default function NetnsVisualizer() {
                       <circle cx={ns.x+18} cy={ns.y+NS_HEADER/2} r={5} fill={ns.color} />
                       <text x={ns.x+32} y={ns.y+NS_HEADER/2+1} dominantBaseline="middle" fontSize={13} fontWeight="700" fill={COLORS.text} fontFamily="'JetBrains Mono', monospace">{ns.name}</text>
                       
-                      {/* iptables button */}
-                      {dockerReady && (
-                        <g onClick={e => { e.stopPropagation(); showIptables(ns); }} style={{ cursor: "pointer" }}>
-                          <rect x={ns.x+NS_W-174} y={ns.y+10} width={28} height={22} rx={4}
-                            fill={(iptablesMap[ns.id]?.length) ? ns.color+"20" : COLORS.border} />
-                          <text x={ns.x+NS_W-160} y={ns.y+23} fontSize={9} fill={(iptablesMap[ns.id]?.length) ? ns.color : COLORS.textDim}
-                            fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">IPT</text>
-                        </g>
-                      )}
-
-                      {/* MAC table button (bridge namespaces only) */}
+                      {/* MT (MAC Table) button (bridge namespaces only) */}
                       {dockerReady && bridges.some(b => b.nsId === ns.id) && (
                         <g onClick={e => { e.stopPropagation(); showMacTable(ns); }} style={{ cursor: "pointer" }}>
-                          <rect x={ns.x+NS_W-238} y={ns.y+10} width={28} height={22} rx={4} fill={ns.color+"20"} />
-                          <text x={ns.x+NS_W-224} y={ns.y+23} fontSize={9} fill={ns.color} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">MAC</text>
+                          <rect x={ns.x+NS_W-244} y={ns.y+10} width={28} height={22} rx={4} fill={ns.color+"20"} />
+                          <text x={ns.x+NS_W-230} y={ns.y+23} fontSize={9} fill={ns.color} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">MT</text>
                         </g>
                       )}
 
-                      {/* ARP table button */}
+                      {/* AT (ARP Table) button */}
                       {dockerReady && (
                         <g onClick={e => { e.stopPropagation(); showArpTable(ns); }} style={{ cursor: "pointer" }}>
-                          <rect x={ns.x+NS_W-206} y={ns.y+10} width={28} height={22} rx={4} fill={ns.color+"20"} />
-                          <text x={ns.x+NS_W-192} y={ns.y+23} fontSize={9} fill={ns.color} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">ARP</text>
+                          <rect x={ns.x+NS_W-212} y={ns.y+10} width={28} height={22} rx={4} fill={ns.color+"20"} />
+                          <text x={ns.x+NS_W-198} y={ns.y+23} fontSize={9} fill={ns.color} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">AT</text>
                         </g>
                       )}
 
-                      {/* ip_forward toggle */}
-                      {dockerReady && (
-                        <g onClick={e => { e.stopPropagation(); toggleIpForward(ns); }} style={{ cursor: "pointer" }}>
-                          <rect x={ns.x+NS_W-142} y={ns.y+10} width={28} height={22} rx={4} fill={ipForwardMap[ns.id] ? (ns.color || COLORS.green)+"20" : COLORS.border} />
-                          <text x={ns.x+NS_W-128} y={ns.y+23} fontSize={10} fill={ipForwardMap[ns.id] ? (ns.color || COLORS.green) : COLORS.textDim} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">FWD</text>
-                        </g>
-                      )}
-
-                      {/* Route button */}
+                      {/* RT (Route Table) button */}
                       {dockerReady && (
                         <g onClick={e => { e.stopPropagation(); showRouteTable(ns); }} style={{ cursor: "pointer" }}>
-                          <rect x={ns.x+NS_W-110} y={ns.y+10} width={22} height={22} rx={4} fill={ns.color+"20"} />
-                          <text x={ns.x+NS_W-99} y={ns.y+23} fontSize={10} fill={ns.color} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">R</text>
+                          <rect x={ns.x+NS_W-180} y={ns.y+10} width={28} height={22} rx={4} fill={ns.color+"20"} />
+                          <text x={ns.x+NS_W-166} y={ns.y+23} fontSize={10} fill={ns.color} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">RT</text>
+                        </g>
+                      )}
+
+                      {/* ip_forward toggle (FWD) */}
+                      {dockerReady && (
+                        <g onClick={e => { e.stopPropagation(); toggleIpForward(ns); }} style={{ cursor: "pointer" }}>
+                          <rect x={ns.x+NS_W-148} y={ns.y+10} width={28} height={22} rx={4} fill={ipForwardMap[ns.id] ? (ns.color || COLORS.green)+"20" : COLORS.border} />
+                          <text x={ns.x+NS_W-134} y={ns.y+23} fontSize={10} fill={ipForwardMap[ns.id] ? (ns.color || COLORS.green) : COLORS.textDim} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">FWD</text>
+                        </g>
+                      )}
+
+                      {/* iptables button (IPT) */}
+                      {dockerReady && (
+                        <g onClick={e => { e.stopPropagation(); showIptables(ns); }} style={{ cursor: "pointer" }}>
+                          <rect x={ns.x+NS_W-116} y={ns.y+10} width={28} height={22} rx={4}
+                            fill={(iptablesMap[ns.id]?.length) ? ns.color+"20" : COLORS.border} />
+                          <text x={ns.x+NS_W-102} y={ns.y+23} fontSize={9} fill={(iptablesMap[ns.id]?.length) ? ns.color : COLORS.textDim}
+                            fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">IPT</text>
                         </g>
                       )}
 

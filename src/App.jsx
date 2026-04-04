@@ -1479,16 +1479,16 @@ export default function NetnsVisualizer() {
                       {/* MAC table button (bridge namespaces only) */}
                       {dockerReady && bridges.some(b => b.nsId === ns.id) && (
                         <g onClick={e => { e.stopPropagation(); showMacTable(ns); }} style={{ cursor: "pointer" }}>
-                          <rect x={ns.x+NS_W-198} y={ns.y+10} width={28} height={22} rx={4} fill={ns.color+"20"} />
-                          <text x={ns.x+NS_W-184} y={ns.y+23} fontSize={9} fill={ns.color} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">MAC</text>
+                          <rect x={ns.x+NS_W-238} y={ns.y+10} width={28} height={22} rx={4} fill={ns.color+"20"} />
+                          <text x={ns.x+NS_W-224} y={ns.y+23} fontSize={9} fill={ns.color} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">MAC</text>
                         </g>
                       )}
 
                       {/* ARP table button */}
                       {dockerReady && (
                         <g onClick={e => { e.stopPropagation(); showArpTable(ns); }} style={{ cursor: "pointer" }}>
-                          <rect x={ns.x+NS_W-168} y={ns.y+10} width={28} height={22} rx={4} fill={ns.color+"20"} />
-                          <text x={ns.x+NS_W-154} y={ns.y+23} fontSize={9} fill={ns.color} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">ARP</text>
+                          <rect x={ns.x+NS_W-206} y={ns.y+10} width={28} height={22} rx={4} fill={ns.color+"20"} />
+                          <text x={ns.x+NS_W-192} y={ns.y+23} fontSize={9} fill={ns.color} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">ARP</text>
                         </g>
                       )}
 

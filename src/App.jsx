@@ -686,7 +686,8 @@ export default function NetnsVisualizer() {
         const ns = data.namespaces.find(n => n.id === rt.nsId);
         if (!ns) continue;
         const dev = rt.iface ? ` dev ${rt.iface}` : "";
-        await execAndLog(`ip netns exec ${ns.name} ip route add ${rt.dest} via ${rt.gateway}${dev}`);
+        const via = rt.gateway ? ` via ${rt.gateway}` : "";
+        await execAndLog(`ip netns exec ${ns.name} ip route add ${rt.dest}${via}${dev}`);
       }
 
       for (const vl of (data.vlans || [])) {
@@ -1201,7 +1202,8 @@ export default function NetnsVisualizer() {
     }
     routes.forEach(r => {
       const ns = namespaces.find(n => n.id === r.nsId); if (!ns) return;
-      c.push(`ip netns exec ${ns.name} ip route add ${r.dest} via ${r.gateway}${r.iface ? ` dev ${r.iface}` : ""}`);
+      const via = r.gateway ? ` via ${r.gateway}` : "";
+      c.push(`ip netns exec ${ns.name} ip route add ${r.dest}${via}${r.iface ? ` dev ${r.iface}` : ""}`);
     });
     if (routes.length) c.push("");
     vlans.forEach(vl => {
@@ -1291,7 +1293,8 @@ export default function NetnsVisualizer() {
       const ns = namespaces.find(n => n.id === data.nsId);
       if (dockerReady && ns) {
         const dev = data.iface ? ` dev ${data.iface}` : "";
-        await execAndLog(`ip netns exec ${ns.name} ip route add ${data.dest} via ${data.gateway}${dev}`);
+        const via = data.gateway ? ` via ${data.gateway}` : "";
+        await execAndLog(`ip netns exec ${ns.name} ip route add ${data.dest}${via}${dev}`);
       }
       update(s => s.routes.push({ id: uid(), nsId: data.nsId, dest: data.dest, gateway: data.gateway, iface: data.iface }));
     } else if (type === "addCommand") {
@@ -1754,7 +1757,7 @@ export default function NetnsVisualizer() {
         <Modal title="Add Route" onClose={() => setModal(null)}>
           <Select label="Namespace" value={modal.data.nsId} onChange={v => setModal({...modal, data:{...modal.data, nsId:v}})} options={nsOptions} />
           <Input label="Destination" value={modal.data.dest} onChange={v => setModal({...modal, data:{...modal.data, dest:v}})} mono placeholder="default or 192.168.1.0/24" />
-          <Input label="Gateway" value={modal.data.gateway} onChange={v => setModal({...modal, data:{...modal.data, gateway:v}})} mono placeholder="10.0.0.1" />
+          <Input label="Gateway" value={modal.data.gateway} onChange={v => setModal({...modal, data:{...modal.data, gateway:v}})} mono placeholder="10.0.0.1（省略可）" />
           <Input label="Interface (optional)" value={modal.data.iface} onChange={v => setModal({...modal, data:{...modal.data, iface:v}})} mono placeholder="veth1b" />
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
             <Btn ghost small onClick={() => setModal(null)}>キャンセル</Btn>

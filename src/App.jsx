@@ -1290,6 +1290,10 @@ export default function NetnsVisualizer() {
         swapped: false
       }));
     } else if (type === "addRoute") {
+      if (!data.gateway && !data.iface) {
+        alert("GATEWAYまたはINTERFACEのいずれかを入力してください");
+        return;
+      }
       const ns = namespaces.find(n => n.id === data.nsId);
       if (dockerReady && ns) {
         const dev = data.iface ? ` dev ${data.iface}` : "";
@@ -1758,7 +1762,7 @@ export default function NetnsVisualizer() {
           <Select label="Namespace" value={modal.data.nsId} onChange={v => setModal({...modal, data:{...modal.data, nsId:v}})} options={nsOptions} />
           <Input label="Destination" value={modal.data.dest} onChange={v => setModal({...modal, data:{...modal.data, dest:v}})} mono placeholder="default or 192.168.1.0/24" />
           <Input label="Gateway" value={modal.data.gateway} onChange={v => setModal({...modal, data:{...modal.data, gateway:v}})} mono placeholder="10.0.0.1（省略可）" />
-          <Input label="Interface (optional)" value={modal.data.iface} onChange={v => setModal({...modal, data:{...modal.data, iface:v}})} mono placeholder="veth1b" />
+          <Input label="Interface (optional)" value={modal.data.iface} onChange={v => setModal({...modal, data:{...modal.data, iface:v}})} mono placeholder="veth0（省略可）" />
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
             <Btn ghost small onClick={() => setModal(null)}>キャンセル</Btn>
             <Btn small color={COLORS.purple} onClick={confirmModal}>追加</Btn>

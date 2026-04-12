@@ -505,6 +505,7 @@ export default function NetnsVisualizer() {
   const [showLog, setShowLog] = useState(false);
   const [routeModal, setRouteModal] = useState(null);
   const [macTableModal, setMacTableModal] = useState(null);
+  const [macTableShowAll, setMacTableShowAll] = useState(false);
   const [arpTableModal, setArpTableModal] = useState(null);
   const [ifaceModal, setIfaceModal] = useState(null);
   const [vlanModal, setVlanModal] = useState(null);
@@ -1799,17 +1800,39 @@ export default function NetnsVisualizer() {
         </Modal>
       )}
 
-      {macTableModal && (
-        <Modal title={`MAC Table: ${macTableModal.nsName}`} onClose={() => setMacTableModal(null)} width={500}>
-          <pre style={{ background: COLORS.bg, color: COLORS.green, padding: 16, borderRadius: 8, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.7, border: `1px solid ${COLORS.border}`, whiteSpace: "pre-wrap", maxHeight: 300, overflow: "auto" }}>
-            {macTableModal.entries || '(empty)'}
-          </pre>
+      {macTableModal && (() => {
+        const rawEntries = macTableModal.entries || '';
+        const filteredEntries = rawEntries ? rawEntries.split('\n').filter(line => {
+          const trimmed = line.trim();
+          if (!trimmed) return false;
+          return trimmed.includes('master') && !trimmed.includes('permanent') && !trimmed.includes('self');
+        }).join('\n') : '';
+        const displayEntries = macTableShowAll ? rawEntries : filteredEntries;
+        const showEmptyMessage = !macTableShowAll && !filteredEntries;
+        return (
+        <Modal title={`MAC Table: ${macTableModal.nsName}`} onClose={() => { setMacTableModal(null); setMacTableShowAll(false); }} width={500}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <Btn small ghost={macTableShowAll} onClick={() => setMacTableShowAll(false)}
+              style={!macTableShowAll ? { background: COLORS.accent, color: '#fff' } : {}}>学習済みのみ</Btn>
+            <Btn small ghost={!macTableShowAll} onClick={() => setMacTableShowAll(true)}
+              style={macTableShowAll ? { background: COLORS.accent, color: '#fff' } : {}}>すべて表示</Btn>
+          </div>
+          {showEmptyMessage ? (
+            <div style={{ background: COLORS.bg, color: COLORS.textMuted, padding: 16, borderRadius: 8, fontSize: 12, border: `1px solid ${COLORS.border}`, textAlign: 'center' }}>
+              まだMACアドレスが学習されていません。pingを実行すると学習されます。
+            </div>
+          ) : (
+            <pre style={{ background: COLORS.bg, color: COLORS.green, padding: 16, borderRadius: 8, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.7, border: `1px solid ${COLORS.border}`, whiteSpace: "pre-wrap", maxHeight: 300, overflow: "auto" }}>
+              {displayEntries || '(empty)'}
+            </pre>
+          )}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
             <Btn small ghost onClick={() => showMacTable({ id: macTableModal.nsId, name: macTableModal.nsName, color: macTableModal.nsColor })}>🔄 更新</Btn>
-            <Btn small ghost onClick={() => setMacTableModal(null)}>閉じる</Btn>
+            <Btn small ghost onClick={() => { setMacTableModal(null); setMacTableShowAll(false); }}>閉じる</Btn>
           </div>
         </Modal>
-      )}
+        );
+      })()}
 
       {arpTableModal && (
         <Modal title={`ARP Table: ${arpTableModal.nsName}`} onClose={() => setArpTableModal(null)} width={500}>

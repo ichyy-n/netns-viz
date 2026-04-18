@@ -1,0 +1,100 @@
+{
+  "namespaces": [
+    {
+      "id": "id_1775890476196_jqay3y5",
+      "name": "ns1",
+      "x": 150,
+      "y": 200,
+      "color": "#3b82f6",
+      "isDefault": false
+    },
+    {
+      "id": "id_1775890478346_barbsbt",
+      "name": "ns2",
+      "x": 1039,
+      "y": 216,
+      "color": "#10b981",
+      "isDefault": false
+    },
+    {
+      "id": "id_1775890484230_zu62j25",
+      "name": "router",
+      "x": 601,
+      "y": 139,
+      "color": "#f59e0b",
+      "isDefault": false
+    }
+  ],
+  "bridges": [],
+  "veths": [
+    {
+      "id": "id_1775890519796_m2fa20i",
+      "name": "veth-pair-1",
+      "endA": {
+        "id": "id_1775890519796_p0u4kx6",
+        "name": "veth1a",
+        "nsId": "id_1775890476196_jqay3y5",
+        "ip": "192.168.1.10/24",
+        "mac": "3e:7d:74:68:ec:fb",
+        "bridge": null
+      },
+      "endB": {
+        "id": "id_1775890519796_2cxvrie",
+        "name": "veth1b",
+        "nsId": "id_1775890484230_zu62j25",
+        "ip": "192.168.1.1/24",
+        "mac": "62:49:aa:e1:a9:2e",
+        "bridge": null
+      },
+      "swapped": false
+    },
+    {
+      "id": "id_1775890543717_8btz2fj",
+      "name": "veth-pair-2",
+      "endA": {
+        "id": "id_1775890543717_5gfacwu",
+        "name": "veth2a",
+        "nsId": "id_1775890484230_zu62j25",
+        "ip": "192.168.2.1/24",
+        "mac": "22:91:51:8b:5a:d0",
+        "bridge": null
+      },
+      "endB": {
+        "id": "id_1775890543717_orvkfgv",
+        "name": "veth2b",
+        "nsId": "id_1775890478346_barbsbt",
+        "ip": "192.168.2.10/24",
+        "mac": "32:5a:cf:1b:62:cb",
+        "bridge": null
+      },
+      "swapped": false
+    }
+  ],
+  "vlans": [],
+  "bridgeVlans": [],
+  "routes": [
+    {
+      "id": "id_1775910687415_tc2rnpr",
+      "nsId": "id_1775890476196_jqay3y5",
+      "dest": "default",
+      "gateway": "192.168.1.1",
+      "iface": ""
+    },
+    {
+      "id": "id_1775911059662_fuyv3hi",
+      "nsId": "id_1775890478346_barbsbt",
+      "dest": "default",
+      "gateway": "192.168.2.1",
+      "iface": ""
+    }
+  ],
+  "commands": [],
+  "ipForwardMap": {
+    "id_1775890476196_jqay3y5": true,
+    "id_1775890478346_barbsbt": true,
+    "id_1775890484230_zu62j25": true,
+    "id_1775910519711_pu25pme": true,
+    "id_1775910521361_ioa9ucq": true
+  },
+  "iptablesMap": {}
+}

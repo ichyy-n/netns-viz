@@ -504,6 +504,9 @@ export default function NetnsVisualizer() {
   const [execLog, setExecLog] = useState([]);
   const [showLog, setShowLog] = useState(false);
   const [routeModal, setRouteModal] = useState(null);
+  const [macTableModal, setMacTableModal] = useState(null);
+  const [macTableShowAll, setMacTableShowAll] = useState(false);
+  const [arpTableModal, setArpTableModal] = useState(null);
   const [ifaceModal, setIfaceModal] = useState(null);
   const [vlanModal, setVlanModal] = useState(null);
   const [bridgeVlanModal, setBridgeVlanModal] = useState(null);
@@ -684,7 +687,8 @@ export default function NetnsVisualizer() {
         const ns = data.namespaces.find(n => n.id === rt.nsId);
         if (!ns) continue;
         const dev = rt.iface ? ` dev ${rt.iface}` : "";
-        await execAndLog(`ip netns exec ${ns.name} ip route add ${rt.dest} via ${rt.gateway}${dev}`);
+        const via = rt.gateway ? ` via ${rt.gateway}` : "";
+        await execAndLog(`ip netns exec ${ns.name} ip route add ${rt.dest}${via}${dev}`);
       }
 
       for (const vl of (data.vlans || [])) {
@@ -1002,6 +1006,20 @@ export default function NetnsVisualizer() {
     setRouteModal({ nsId: ns.id, nsName: ns.name, nsColor: ns.color, routes: r.success ? r.output : 'Failed to fetch routes' });
   }, [dockerReady]);
 
+  const showMacTable = useCallback(async (ns) => {
+    if (!dockerReady) return;
+    const br = bridges.find(b => b.nsId === ns.id);
+    if (!br) return;
+    const r = await window.electronAPI.docker.exec(`ip netns exec ${ns.name} bridge fdb show br ${br.name}`);
+    setMacTableModal({ nsId: ns.id, nsName: ns.name, nsColor: ns.color, entries: r.success ? r.output : 'Failed to fetch MAC table' });
+  }, [dockerReady, bridges]);
+
+  const showArpTable = useCallback(async (ns) => {
+    if (!dockerReady) return;
+    const r = await window.electronAPI.docker.exec(`ip netns exec ${ns.name} ip neigh show`);
+    setArpTableModal({ nsId: ns.id, nsName: ns.name, nsColor: ns.color, entries: r.success ? r.output : 'Failed to fetch ARP table' });
+  }, [dockerReady]);
+
   const showIptables = useCallback((ns) => {
     setIptablesModal({
       nsId: ns.id,
@@ -1185,7 +1203,8 @@ export default function NetnsVisualizer() {
     }
     routes.forEach(r => {
       const ns = namespaces.find(n => n.id === r.nsId); if (!ns) return;
-      c.push(`ip netns exec ${ns.name} ip route add ${r.dest} via ${r.gateway}${r.iface ? ` dev ${r.iface}` : ""}`);
+      const via = r.gateway ? ` via ${r.gateway}` : "";
+      c.push(`ip netns exec ${ns.name} ip route add ${r.dest}${via}${r.iface ? ` dev ${r.iface}` : ""}`);
     });
     if (routes.length) c.push("");
     vlans.forEach(vl => {
@@ -1272,10 +1291,15 @@ export default function NetnsVisualizer() {
         swapped: false
       }));
     } else if (type === "addRoute") {
+      if (!data.gateway && !data.iface) {
+        alert("GATEWAYまたはINTERFACEのいずれかを入力してください");
+        return;
+      }
       const ns = namespaces.find(n => n.id === data.nsId);
       if (dockerReady && ns) {
         const dev = data.iface ? ` dev ${data.iface}` : "";
-        await execAndLog(`ip netns exec ${ns.name} ip route add ${data.dest} via ${data.gateway}${dev}`);
+        const via = data.gateway ? ` via ${data.gateway}` : "";
+        await execAndLog(`ip netns exec ${ns.name} ip route add ${data.dest}${via}${dev}`);
       }
       update(s => s.routes.push({ id: uid(), nsId: data.nsId, dest: data.dest, gateway: data.gateway, iface: data.iface }));
     } else if (type === "addCommand") {
@@ -1450,29 +1474,45 @@ export default function NetnsVisualizer() {
                       <circle cx={ns.x+18} cy={ns.y+NS_HEADER/2} r={5} fill={ns.color} />
                       <text x={ns.x+32} y={ns.y+NS_HEADER/2+1} dominantBaseline="middle" fontSize={13} fontWeight="700" fill={COLORS.text} fontFamily="'JetBrains Mono', monospace">{ns.name}</text>
                       
-                      {/* iptables button */}
-                      {dockerReady && (
-                        <g onClick={e => { e.stopPropagation(); showIptables(ns); }} style={{ cursor: "pointer" }}>
-                          <rect x={ns.x+NS_W-174} y={ns.y+10} width={28} height={22} rx={4}
-                            fill={(iptablesMap[ns.id]?.length) ? ns.color+"20" : COLORS.border} />
-                          <text x={ns.x+NS_W-160} y={ns.y+23} fontSize={9} fill={(iptablesMap[ns.id]?.length) ? ns.color : COLORS.textDim}
-                            fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">IPT</text>
+                      {/* MT (MAC Table) button (bridge namespaces only) */}
+                      {dockerReady && bridges.some(b => b.nsId === ns.id) && (
+                        <g onClick={e => { e.stopPropagation(); showMacTable(ns); }} style={{ cursor: "pointer" }}>
+                          <rect x={ns.x+NS_W-244} y={ns.y+10} width={28} height={22} rx={4} fill={ns.color+"20"} />
+                          <text x={ns.x+NS_W-230} y={ns.y+23} fontSize={9} fill={ns.color} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">MT</text>
                         </g>
                       )}
 
-                      {/* ip_forward toggle */}
+                      {/* AT (ARP Table) button */}
                       {dockerReady && (
-                        <g onClick={e => { e.stopPropagation(); toggleIpForward(ns); }} style={{ cursor: "pointer" }}>
-                          <rect x={ns.x+NS_W-142} y={ns.y+10} width={28} height={22} rx={4} fill={ipForwardMap[ns.id] ? (ns.color || COLORS.green)+"20" : COLORS.border} />
-                          <text x={ns.x+NS_W-128} y={ns.y+23} fontSize={10} fill={ipForwardMap[ns.id] ? (ns.color || COLORS.green) : COLORS.textDim} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">FWD</text>
+                        <g onClick={e => { e.stopPropagation(); showArpTable(ns); }} style={{ cursor: "pointer" }}>
+                          <rect x={ns.x+NS_W-212} y={ns.y+10} width={28} height={22} rx={4} fill={ns.color+"20"} />
+                          <text x={ns.x+NS_W-198} y={ns.y+23} fontSize={9} fill={ns.color} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">AT</text>
                         </g>
                       )}
 
-                      {/* Route button */}
+                      {/* RT (Route Table) button */}
                       {dockerReady && (
                         <g onClick={e => { e.stopPropagation(); showRouteTable(ns); }} style={{ cursor: "pointer" }}>
-                          <rect x={ns.x+NS_W-110} y={ns.y+10} width={22} height={22} rx={4} fill={ns.color+"20"} />
-                          <text x={ns.x+NS_W-99} y={ns.y+23} fontSize={10} fill={ns.color} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">R</text>
+                          <rect x={ns.x+NS_W-180} y={ns.y+10} width={28} height={22} rx={4} fill={ns.color+"20"} />
+                          <text x={ns.x+NS_W-166} y={ns.y+23} fontSize={10} fill={ns.color} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">RT</text>
+                        </g>
+                      )}
+
+                      {/* ip_forward toggle (FWD) */}
+                      {dockerReady && (
+                        <g onClick={e => { e.stopPropagation(); toggleIpForward(ns); }} style={{ cursor: "pointer" }}>
+                          <rect x={ns.x+NS_W-148} y={ns.y+10} width={28} height={22} rx={4} fill={ipForwardMap[ns.id] ? (ns.color || COLORS.green)+"20" : COLORS.border} />
+                          <text x={ns.x+NS_W-134} y={ns.y+23} fontSize={10} fill={ipForwardMap[ns.id] ? (ns.color || COLORS.green) : COLORS.textDim} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">FWD</text>
+                        </g>
+                      )}
+
+                      {/* iptables button (IPT) */}
+                      {dockerReady && (
+                        <g onClick={e => { e.stopPropagation(); showIptables(ns); }} style={{ cursor: "pointer" }}>
+                          <rect x={ns.x+NS_W-116} y={ns.y+10} width={28} height={22} rx={4}
+                            fill={(iptablesMap[ns.id]?.length) ? ns.color+"20" : COLORS.border} />
+                          <text x={ns.x+NS_W-102} y={ns.y+23} fontSize={9} fill={(iptablesMap[ns.id]?.length) ? ns.color : COLORS.textDim}
+                            fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">IPT</text>
                         </g>
                       )}
 
@@ -1722,8 +1762,8 @@ export default function NetnsVisualizer() {
         <Modal title="Add Route" onClose={() => setModal(null)}>
           <Select label="Namespace" value={modal.data.nsId} onChange={v => setModal({...modal, data:{...modal.data, nsId:v}})} options={nsOptions} />
           <Input label="Destination" value={modal.data.dest} onChange={v => setModal({...modal, data:{...modal.data, dest:v}})} mono placeholder="default or 192.168.1.0/24" />
-          <Input label="Gateway" value={modal.data.gateway} onChange={v => setModal({...modal, data:{...modal.data, gateway:v}})} mono placeholder="10.0.0.1" />
-          <Input label="Interface (optional)" value={modal.data.iface} onChange={v => setModal({...modal, data:{...modal.data, iface:v}})} mono placeholder="veth1b" />
+          <Input label="Gateway" value={modal.data.gateway} onChange={v => setModal({...modal, data:{...modal.data, gateway:v}})} mono placeholder="10.0.0.1（省略可）" />
+          <Input label="Interface (optional)" value={modal.data.iface} onChange={v => setModal({...modal, data:{...modal.data, iface:v}})} mono placeholder="veth0（省略可）" />
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
             <Btn ghost small onClick={() => setModal(null)}>キャンセル</Btn>
             <Btn small color={COLORS.purple} onClick={confirmModal}>追加</Btn>
@@ -1756,6 +1796,52 @@ export default function NetnsVisualizer() {
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
             <Btn small ghost onClick={() => showRouteTable({ id: routeModal.nsId, name: routeModal.nsName })}>🔄 更新</Btn>
             <Btn small ghost onClick={() => setRouteModal(null)}>閉じる</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {macTableModal && (() => {
+        const rawEntries = macTableModal.entries || '';
+        const filteredEntries = rawEntries ? rawEntries.split('\n').filter(line => {
+          const trimmed = line.trim();
+          if (!trimmed) return false;
+          return trimmed.includes('master') && !trimmed.includes('permanent') && !trimmed.includes('self');
+        }).join('\n') : '';
+        const displayEntries = macTableShowAll ? rawEntries : filteredEntries;
+        const showEmptyMessage = !macTableShowAll && !filteredEntries;
+        return (
+        <Modal title={`MAC Table: ${macTableModal.nsName}`} onClose={() => { setMacTableModal(null); setMacTableShowAll(false); }} width={500}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <Btn small ghost={macTableShowAll} onClick={() => setMacTableShowAll(false)}
+              style={!macTableShowAll ? { background: COLORS.accent, color: '#fff' } : {}}>学習済みのみ</Btn>
+            <Btn small ghost={!macTableShowAll} onClick={() => setMacTableShowAll(true)}
+              style={macTableShowAll ? { background: COLORS.accent, color: '#fff' } : {}}>すべて表示</Btn>
+          </div>
+          {showEmptyMessage ? (
+            <div style={{ background: COLORS.bg, color: COLORS.textMuted, padding: 16, borderRadius: 8, fontSize: 12, border: `1px solid ${COLORS.border}`, textAlign: 'center' }}>
+              まだMACアドレスが学習されていません。pingを実行すると学習されます。
+            </div>
+          ) : (
+            <pre style={{ background: COLORS.bg, color: COLORS.green, padding: 16, borderRadius: 8, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.7, border: `1px solid ${COLORS.border}`, whiteSpace: "pre-wrap", maxHeight: 300, overflow: "auto" }}>
+              {displayEntries || '(empty)'}
+            </pre>
+          )}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+            <Btn small ghost onClick={() => showMacTable({ id: macTableModal.nsId, name: macTableModal.nsName, color: macTableModal.nsColor })}>🔄 更新</Btn>
+            <Btn small ghost onClick={() => { setMacTableModal(null); setMacTableShowAll(false); }}>閉じる</Btn>
+          </div>
+        </Modal>
+        );
+      })()}
+
+      {arpTableModal && (
+        <Modal title={`ARP Table: ${arpTableModal.nsName}`} onClose={() => setArpTableModal(null)} width={500}>
+          <pre style={{ background: COLORS.bg, color: COLORS.green, padding: 16, borderRadius: 8, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.7, border: `1px solid ${COLORS.border}`, whiteSpace: "pre-wrap", maxHeight: 300, overflow: "auto" }}>
+            {arpTableModal.entries || '(empty)'}
+          </pre>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+            <Btn small ghost onClick={() => showArpTable({ id: arpTableModal.nsId, name: arpTableModal.nsName })}>🔄 更新</Btn>
+            <Btn small ghost onClick={() => setArpTableModal(null)}>閉じる</Btn>
           </div>
         </Modal>
       )}

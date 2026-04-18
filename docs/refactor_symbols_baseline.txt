@@ -1,0 +1,24 @@
+3:const COLORS = {
+12:const NS_COLORS = ["#3b82f6","#10b981","#f59e0b","#a855f7","#06b6d4","#ef4444","#ec4899","#84cc16"];
+14:const uid = () => `id_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+15:const defaultState = () => ({ namespaces: [], bridges: [], veths: [], vlans: [], bridgeVlans: [], routes: [], commands: [] });
+16:const GUI_STATE_KEY = "netns-viz:gui-state:v1";
+18:const CHAIN_OPTIONS = {
+26:const enrichBridgeVlans = (bridgeVlans, veths, bridges = []) => {
+49:const loadGuiState = () => {
+69:const Icon = ({ d, size = 16, color = COLORS.textMuted }) => (
+72:const Icons = {
+82:const Btn = ({ children, onClick, color = COLORS.accent, small, ghost, disabled, style, ...props }) => {
+97:const Modal = ({ title, onClose, children, width = 420 }) => {
+160:const Input = ({ label, value, onChange, placeholder, mono }) => (
+169:const Select = ({ label, value, onChange, options }) => (
+181:const NsTerminal = ({ tabId, ns, dockerReady }) => {
+314:const HostTerminal = ({ tabId, dockerReady }) => {
+447:const NS_W = 380, NS_HEADER = 44, NS_ITEM_H = 44;
+449:function getNsHeight(ns, bridges, veths, vlans = []) {
+457:function getInterfacePositions(namespaces, bridges, veths, vlans = []) {
+477:const isElectron = () => Boolean(window.electronAPI);
+479:const CIDR_RE = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}$/;
+480:const validateCidr = (ip) => !ip || CIDR_RE.test(ip);
+481:const CIDR_ERROR_MSG = 'IPアドレスにはCIDR表記（例: /24）を含めてください';
+486:export default function NetnsVisualizer() {

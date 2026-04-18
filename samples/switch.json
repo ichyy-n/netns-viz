@@ -1,0 +1,121 @@
+{
+  "namespaces": [
+    {
+      "id": "id_1775952078035_36ifhqk",
+      "name": "ns1",
+      "x": 145.35695554160074,
+      "y": -10.484682114100394,
+      "color": "#3b82f6",
+      "isDefault": false
+    },
+    {
+      "id": "id_1775952080167_1tmpie7",
+      "name": "ns2",
+      "x": 367.13386599683486,
+      "y": 173.68941473573733,
+      "color": "#10b981",
+      "isDefault": false
+    },
+    {
+      "id": "id_1775952083817_hltpstw",
+      "name": "ns3",
+      "x": 1345.7270231711504,
+      "y": 195.35695554160083,
+      "color": "#f59e0b",
+      "isDefault": false
+    },
+    {
+      "id": "id_1775952092634_pxe1i8i",
+      "name": "switch1",
+      "x": 849.819763725827,
+      "y": -147.11634231298473,
+      "color": "#a855f7",
+      "isDefault": false
+    }
+  ],
+  "bridges": [
+    {
+      "id": "id_1775952269072_c2m1qjq",
+      "name": "br0",
+      "nsId": "id_1775952092634_pxe1i8i",
+      "ip": "",
+      "vlanFiltering": false
+    }
+  ],
+  "veths": [
+    {
+      "id": "id_1775957766985_p3icsgf",
+      "name": "veth-pair-1",
+      "endA": {
+        "id": "id_1775957766985_2dpg7z7",
+        "name": "veth1a",
+        "nsId": "id_1775952078035_36ifhqk",
+        "ip": "192.168.1.1/24",
+        "mac": "fa:62:7d:98:45:d1",
+        "bridge": null
+      },
+      "endB": {
+        "id": "id_1775957766985_5cjho8t",
+        "name": "veth1b",
+        "nsId": "id_1775952092634_pxe1i8i",
+        "ip": "",
+        "mac": "92:b3:e0:da:77:68",
+        "bridge": "id_1775952269072_c2m1qjq"
+      },
+      "swapped": false
+    },
+    {
+      "id": "id_1775958078489_vo3u3lj",
+      "name": "veth-pair-2",
+      "endA": {
+        "id": "id_1775958078489_jj61qt1",
+        "name": "veth2a",
+        "nsId": "id_1775952080167_1tmpie7",
+        "ip": "192.168.1.2/24",
+        "mac": "a2:19:26:6a:de:9a",
+        "bridge": null
+      },
+      "endB": {
+        "id": "id_1775958078489_qbmuzr8",
+        "name": "veth2b",
+        "nsId": "id_1775952092634_pxe1i8i",
+        "ip": "",
+        "mac": "be:e6:ee:9f:4c:03",
+        "bridge": "id_1775952269072_c2m1qjq"
+      },
+      "swapped": false
+    },
+    {
+      "id": "id_1775958121085_on592af",
+      "name": "veth-pair-3",
+      "endA": {
+        "id": "id_1775958121085_8w13cs1",
+        "name": "veth3a",
+        "nsId": "id_1775952083817_hltpstw",
+        "ip": "192.168.1.3/24",
+        "mac": "c2:3d:8b:d4:3d:4f",
+        "bridge": null
+      },
+      "endB": {
+        "id": "id_1775958121085_k3iuso7",
+        "name": "veth3b",
+        "nsId": "id_1775952092634_pxe1i8i",
+        "ip": "",
+        "mac": "26:c2:05:be:10:b7",
+        "bridge": "id_1775952269072_c2m1qjq"
+      },
+      "swapped": true
+    }
+  ],
+  "vlans": [],
+  "bridgeVlans": [],
+  "routes": [],
+  "commands": [],
+  "ipForwardMap": {
+    "id_1775952078035_36ifhqk": true,
+    "id_1775952080167_1tmpie7": true,
+    "id_1775952083817_hltpstw": true,
+    "id_1775952092634_pxe1i8i": true
+  },
+  "iptablesMap": {}
+}

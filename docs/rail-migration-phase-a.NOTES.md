@@ -34,6 +34,12 @@
 - **原文**: 3h50m / 6〜8h
 - **task YAML 修正6**: 8〜10h（Electron 実機起動・snapshot 取得・console.error 点検を含む現実線）。
 
+### 修正7: ICONS 配置（家老裁定 2026-04-19T15:48）
+- **原指示書**: `src/theme.js` 末尾に `TOKENS / ICONS / LABELS_JP` を追記
+- **問題**: ICONS は `<circle><path>` 等の JSX を含むが、`vite.config.js` の `plugin-react` は既定で `.jsx/.tsx` のみを変換し `.js` は対象外。`theme.js` を `theme.jsx` に改名すると 18 ファイルの import パスに影響し、`logic/` `ipc/` `modals/` `terminal/` `primitives/` 配下の diff=0 制約に違反する。
+- **家老裁定**: **B案採用**。`ICONS` は `src/ui/shell/IconStroke.jsx` に同居（`IconStroke` と一緒に配置）。`theme.js` には `TOKENS` / `LABELS_JP` のみを追記（純粋 JS のまま）。consumer は `import { ICONS } from './IconStroke.jsx'` で参照。`vite.config.js` は変更禁止。
+- **実装の正**: Step 2 で theme.js に TOKENS/LABELS_JP/FONT_JP のみ追記。Step 3 で IconStroke.jsx 新設時に ICONS を同居させる。
+
 ## その他メモ
 
 - LeftRail の expand 状態（ネットワーク／スイッチ／ホスト／VLAN／リンクの折りたたみ）は Phase A では **session 内 useState のみ**。sessionStorage 永続化は実施しない（Phase B/C で必要になった時点で追加）。

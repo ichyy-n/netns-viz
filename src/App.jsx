@@ -4,32 +4,9 @@ import { uid } from "./logic/ids.js";
 import { CHAIN_OPTIONS } from "./logic/constants.js";
 import { CIDR_RE, validateCidr, CIDR_ERROR_MSG } from "./logic/validation.js";
 import { getNsHeight, getInterfacePositions } from "./logic/topology.js";
+import { enrichBridgeVlans } from "./logic/enrich.js";
 const defaultState = () => ({ namespaces: [], bridges: [], veths: [], vlans: [], bridgeVlans: [], routes: [], commands: [] });
 const GUI_STATE_KEY = "netns-viz:gui-state:v1";
-
-// Enrich bridgeVlans entries with vethId/vethEnd/bridgeId if missing (older save format compatibility)
-const enrichBridgeVlans = (bridgeVlans, veths, bridges = []) => {
-  for (const bv of bridgeVlans) {
-    if (!bv.vethId || !bv.vethEnd) {
-      for (const v of veths) {
-        for (const end of ['endA', 'endB']) {
-          if (v[end].name === bv.dev && v[end].nsId === bv.nsId) {
-            bv.vethId = v.id;
-            bv.vethEnd = end;
-            if (!bv.bridgeId && v[end].bridge) bv.bridgeId = v[end].bridge;
-            break;
-          }
-        }
-        if (bv.vethId) break;
-      }
-    }
-    if (!bv.bridgeId) {
-      // Fallback: find bridge in the same namespace
-      const br = bridges.find(b => b.nsId === bv.nsId);
-      if (br) bv.bridgeId = br.id;
-    }
-  }
-};
 
 const loadGuiState = () => {
   if (typeof window === "undefined") return defaultState();

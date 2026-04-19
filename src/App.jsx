@@ -1,15 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { COLORS, NS_COLORS, NS_W, NS_HEADER, NS_ITEM_H } from "./theme.js";
 import { uid } from "./logic/ids.js";
+import { CHAIN_OPTIONS } from "./logic/constants.js";
 const defaultState = () => ({ namespaces: [], bridges: [], veths: [], vlans: [], bridgeVlans: [], routes: [], commands: [] });
 const GUI_STATE_KEY = "netns-viz:gui-state:v1";
-
-const CHAIN_OPTIONS = {
-  filter: ['INPUT', 'OUTPUT', 'FORWARD'],
-  nat: ['PREROUTING', 'POSTROUTING', 'OUTPUT'],
-  mangle: ['PREROUTING', 'INPUT', 'OUTPUT', 'FORWARD', 'POSTROUTING'],
-  raw: ['PREROUTING', 'OUTPUT']
-};
 
 // Enrich bridgeVlans entries with vethId/vethEnd/bridgeId if missing (older save format compatibility)
 const enrichBridgeVlans = (bridgeVlans, veths, bridges = []) => {

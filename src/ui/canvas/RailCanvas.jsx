@@ -35,6 +35,36 @@ export default function RailCanvas({
   const links = useMemo(() => railView?.links || [], [railView]);
   const geometry = useMemo(() => buildLinkGeometry(railView), [railView]);
 
+  const extrasByNs = useMemo(() => {
+    const map = {};
+    const bridgeVlans = railView?.bridgeVlans || [];
+    const veths = railView?.veths || [];
+    for (const ns of namespaces) {
+      if (ns.role === 'switch') {
+        const bvs = bridgeVlans.filter((bv) => bv.nsId === ns.id);
+        const portCount = new Set(bvs.map((bv) => bv.dev)).size;
+        const vlanCount = new Set(bvs.map((bv) => bv.vid)).size;
+        map[ns.id] = {
+          portCount: portCount || undefined,
+          vlanCount: vlanCount || undefined,
+        };
+      } else {
+        let ip = null;
+        let vethName = null;
+        for (const v of veths) {
+          for (const end of ['endA', 'endB']) {
+            if (v[end].nsId === ns.id) {
+              if (!ip && v[end].ip) ip = v[end].ip;
+              if (!vethName) vethName = v[end].name;
+            }
+          }
+        }
+        map[ns.id] = { ip, vethName };
+      }
+    }
+    return map;
+  }, [namespaces, railView]);
+
   const toSvgPoint = useCallback((clientX, clientY) => {
     const svg = svgRef.current;
     if (!svg || typeof svg.createSVGPoint !== 'function') {
@@ -245,6 +275,7 @@ export default function RailCanvas({
               <NodeCard
                 key={ns.id}
                 ns={{ ...ns, x: pos.x, y: pos.y }}
+                extras={extrasByNs[ns.id]}
                 selected={selectedId === ns.id}
                 dim={isNodeDim(ns.id)}
                 onClick={(e) => handleNodeClick(e, ns)}

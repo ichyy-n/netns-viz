@@ -7,6 +7,7 @@ import { getNsHeight, getInterfacePositions } from "./logic/topology.js";
 import { enrichBridgeVlans } from "./logic/enrich.js";
 import { defaultState, loadGuiState, saveGuiState, GUI_STATE_KEY } from "./logic/state.js";
 import { saveFile, loadFile } from "./ipc/file.js";
+import { dockerStart, dockerExec, onDockerStatus } from "./ipc/docker.js";
 
 const Icon = ({ d, size = 16, color = COLORS.textMuted }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>
@@ -446,7 +447,7 @@ export default function NetnsVisualizer() {
     if (!isElectron()) return;
     setDockerLoading(true);
     try {
-      const r = await window.electronAPI.docker.start();
+      const r = await dockerStart();
       if (r.success) { setDockerReady(true); addExecLog('docker start', 'Container started'); }
     } catch (e) { addExecLog('docker start', e.message, false); }
     setDockerLoading(false);
@@ -454,7 +455,7 @@ export default function NetnsVisualizer() {
 
   useEffect(() => {
     if (!isElectron() || !window.electronAPI.status?.onDockerStatus) return;
-    return window.electronAPI.status.onDockerStatus((payload) => {
+    return onDockerStatus((payload) => {
       if (payload?.source !== 'resume') return;
       // まずdockerReadyをfalseにして全ターミナルのuseEffectクリーンアップを発火
       setDockerReady(false);
@@ -476,7 +477,7 @@ export default function NetnsVisualizer() {
       // ip_forward: Linux実態を読み取り
       const fwUpdates = {};
       for (const ns of namespaces) {
-        const r = await window.electronAPI.docker.exec(`ip netns exec ${ns.name} cat /proc/sys/net/ipv4/ip_forward`);
+        const r = await dockerExec(`ip netns exec ${ns.name} cat /proc/sys/net/ipv4/ip_forward`);
         if (r.success) fwUpdates[ns.id] = (r.output || '').trim() === '1';
       }
       if (Object.keys(fwUpdates).length) setIpForwardMap(prev => ({ ...prev, ...fwUpdates }));
@@ -487,7 +488,7 @@ export default function NetnsVisualizer() {
         if (!ns || !rules.length) continue;
         for (const rule of rules) {
           const extraPart = rule.extra ? ` ${rule.extra}` : '';
-          await window.electronAPI.docker.exec(`ip netns exec ${ns.name} iptables -t ${rule.table} -A ${rule.chain}${extraPart} -j ${rule.target}`);
+          await dockerExec(`ip netns exec ${ns.name} iptables -t ${rule.table} -A ${rule.chain}${extraPart} -j ${rule.target}`);
         }
       }
 
@@ -499,7 +500,7 @@ export default function NetnsVisualizer() {
         if (bv.devType === 'self') cmd += ' self';
         if (bv.pvid) cmd += ' pvid';
         if (bv.untagged) cmd += ' untagged';
-        await window.electronAPI.docker.exec(cmd);
+        await dockerExec(cmd);
       }
     };
     syncOnResume();
@@ -507,7 +508,7 @@ export default function NetnsVisualizer() {
 
   const execAndLog = useCallback(async (cmd) => {
     if (!isElectron() || !dockerReady) return { success: false, output: 'Docker not ready' };
-    const r = await window.electronAPI.docker.exec(cmd);
+    const r = await dockerExec(cmd);
     addExecLog(cmd, r.output || (r.success ? 'OK' : 'Failed'), r.success);
     return r;
   }, [dockerReady, addExecLog]);
@@ -551,7 +552,7 @@ export default function NetnsVisualizer() {
     let fwResult = {};
     if (dockerReady) {
       addExecLog('load', 'Cleaning current environment...');
-      const listResult = await window.electronAPI.docker.exec('ip netns list');
+      const listResult = await dockerExec('ip netns list');
       if (listResult.success && listResult.output) {
         const existingNs = listResult.output.trim().split('\n')
           .map(line => line.split(/\s/)[0]).filter(Boolean);
@@ -646,7 +647,7 @@ export default function NetnsVisualizer() {
       // Read actual Linux ip_forward state for all namespaces
       const fwUpdates = {};
       for (const ns of data.namespaces) {
-        const fwRes = await window.electronAPI.docker.exec(
+        const fwRes = await dockerExec(
           `ip netns exec ${ns.name} cat /proc/sys/net/ipv4/ip_forward`
         );
         if (fwRes.success) {
@@ -669,8 +670,8 @@ export default function NetnsVisualizer() {
   const fetchIfaceRuntime = useCallback(async (ifaceName, nsName) => {
     if (!dockerReady) return { ip: "", mac: null };
     const [ipRes, macRes] = await Promise.all([
-      window.electronAPI.docker.exec(`ip netns exec ${nsName} sh -lc "ip -o -4 addr show dev ${ifaceName} 2>/dev/null | awk '{print \\$4; exit}'"`),
-      window.electronAPI.docker.exec(`ip netns exec ${nsName} cat /sys/class/net/${ifaceName}/address 2>/dev/null`),
+      dockerExec(`ip netns exec ${nsName} sh -lc "ip -o -4 addr show dev ${ifaceName} 2>/dev/null | awk '{print \\$4; exit}'"`),
+      dockerExec(`ip netns exec ${nsName} cat /sys/class/net/${ifaceName}/address 2>/dev/null`),
     ]);
     return {
       ip: ipRes.success ? (ipRes.output || "").trim() : "",
@@ -908,7 +909,7 @@ export default function NetnsVisualizer() {
 
   const showRouteTable = useCallback(async (ns) => {
     if (!dockerReady) return;
-    const r = await window.electronAPI.docker.exec(`ip netns exec ${ns.name} ip route show`);
+    const r = await dockerExec(`ip netns exec ${ns.name} ip route show`);
     setRouteModal({ nsId: ns.id, nsName: ns.name, nsColor: ns.color, routes: r.success ? r.output : 'Failed to fetch routes' });
   }, [dockerReady]);
 
@@ -916,13 +917,13 @@ export default function NetnsVisualizer() {
     if (!dockerReady) return;
     const br = bridges.find(b => b.nsId === ns.id);
     if (!br) return;
-    const r = await window.electronAPI.docker.exec(`ip netns exec ${ns.name} bridge fdb show br ${br.name}`);
+    const r = await dockerExec(`ip netns exec ${ns.name} bridge fdb show br ${br.name}`);
     setMacTableModal({ nsId: ns.id, nsName: ns.name, nsColor: ns.color, entries: r.success ? r.output : 'Failed to fetch MAC table' });
   }, [dockerReady, bridges]);
 
   const showArpTable = useCallback(async (ns) => {
     if (!dockerReady) return;
-    const r = await window.electronAPI.docker.exec(`ip netns exec ${ns.name} ip neigh show`);
+    const r = await dockerExec(`ip netns exec ${ns.name} ip neigh show`);
     setArpTableModal({ nsId: ns.id, nsName: ns.name, nsColor: ns.color, entries: r.success ? r.output : 'Failed to fetch ARP table' });
   }, [dockerReady]);
 
@@ -1225,11 +1226,11 @@ export default function NetnsVisualizer() {
           const nsB = namespaces.find(n => n.id === data.endBNs);
           const updates = {};
           if (nsA) {
-            const r = await window.electronAPI.docker.exec(`ip netns exec ${nsA.name} cat /sys/class/net/${data.endAName}/address 2>/dev/null`);
+            const r = await dockerExec(`ip netns exec ${nsA.name} cat /sys/class/net/${data.endAName}/address 2>/dev/null`);
             if (r.success && r.output.trim()) updates.macA = r.output.trim();
           }
           if (nsB) {
-            const r = await window.electronAPI.docker.exec(`ip netns exec ${nsB.name} cat /sys/class/net/${data.endBName}/address 2>/dev/null`);
+            const r = await dockerExec(`ip netns exec ${nsB.name} cat /sys/class/net/${data.endBName}/address 2>/dev/null`);
             if (r.success && r.output.trim()) updates.macB = r.output.trim();
           }
           if (updates.macA || updates.macB) {

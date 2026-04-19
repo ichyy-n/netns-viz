@@ -1,3 +1,4 @@
+/* global Buffer, process */
 import Docker from 'dockerode'
 import path from 'path'
 import { fileURLToPath } from 'url'

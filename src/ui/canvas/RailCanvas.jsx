@@ -265,6 +265,9 @@ export default function RailCanvas({
               d={g.d}
               kind={g.kind}
               vid={g.vid}
+              vids={g.vids}
+              pa={g.a}
+              pb={g.b}
               highlighted={isLinkHighlighted(g)}
               dim={isLinkDim(g)}
             />

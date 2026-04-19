@@ -8,6 +8,7 @@ import { enrichBridgeVlans } from "./logic/enrich.js";
 import { defaultState, loadGuiState, saveGuiState, GUI_STATE_KEY } from "./logic/state.js";
 import { saveFile, loadFile } from "./ipc/file.js";
 import { dockerStart, dockerExec, onDockerStatus } from "./ipc/docker.js";
+import { openShell, closeShell, sendCommand, killSession, writeSession, onShellData } from "./ipc/shell.js";
 
 const Icon = ({ d, size = 16, color = COLORS.textMuted }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>
@@ -139,15 +140,15 @@ const NsTerminal = ({ tabId, ns, dockerReady }) => {
     if (!isElectron() || !window.electronAPI.docker.openShell || !dockerReady) return;
     const sid = sessionIdRef.current;
     const shellCmd = `ip netns exec ${ns.name} bash`;
-    window.electronAPI.docker.openShell(sid, shellCmd);
+    openShell(sid, shellCmd);
     setShellReady(true);
-    return () => { window.electronAPI.docker.closeShell(sid); };
+    return () => { closeShell(sid); };
   }, [dockerReady, ns.name]);
 
   // ストリームデータ受信
   useEffect(() => {
     if (!isElectron() || !window.electronAPI.stream) return;
-    const cleanup = window.electronAPI.stream.onData((sid, data) => {
+    const cleanup = onShellData((sid, data) => {
       if (sid !== sessionIdRef.current) return;
 
       if (data.includes('__SHELL_EXIT__')) {
@@ -183,7 +184,7 @@ const NsTerminal = ({ tabId, ns, dockerReady }) => {
     setRunning(true);
 
     try {
-      await window.electronAPI.docker.sendCommand(sessionIdRef.current, cmd);
+      await sendCommand(sessionIdRef.current, cmd);
     } catch (e) {
       setHistory(prev => [...prev, { type: "err", text: e.message }]);
       setRunning(false);
@@ -192,7 +193,7 @@ const NsTerminal = ({ tabId, ns, dockerReady }) => {
   };
 
   const killCmd = async () => {
-    await window.electronAPI.docker.killSession(sessionIdRef.current);
+    await killSession(sessionIdRef.current);
     setHistory(prev => [...prev, { type: "err", text: "^C" }]);
     setRunning(false);
   };
@@ -205,7 +206,7 @@ const NsTerminal = ({ tabId, ns, dockerReady }) => {
       setCmdHistory(prev => [...prev, text]);
       setHistory(prev => [...prev, { type: "stdin", text }]);
     }
-    await window.electronAPI.docker.writeSession(sessionIdRef.current, `${text}\n`);
+    await writeSession(sessionIdRef.current, `${text}\n`);
   };
 
   const onKeyDown = (e) => {
@@ -271,15 +272,15 @@ const HostTerminal = ({ tabId, dockerReady }) => {
   useEffect(() => {
     if (!isElectron() || !window.electronAPI.docker.openShell || !dockerReady) return;
     const sid = sessionIdRef.current;
-    window.electronAPI.docker.openShell(sid, 'bash');
+    openShell(sid, 'bash');
     setShellReady(true);
-    return () => { window.electronAPI.docker.closeShell(sid); };
+    return () => { closeShell(sid); };
   }, [dockerReady]);
 
   // ストリームデータ受信
   useEffect(() => {
     if (!isElectron() || !window.electronAPI.stream) return;
-    const cleanup = window.electronAPI.stream.onData((sid, data) => {
+    const cleanup = onShellData((sid, data) => {
       if (sid !== sessionIdRef.current) return;
 
       if (data.includes('__SHELL_EXIT__')) {
@@ -315,7 +316,7 @@ const HostTerminal = ({ tabId, dockerReady }) => {
     setRunning(true);
 
     try {
-      await window.electronAPI.docker.sendCommand(sessionIdRef.current, cmd);
+      await sendCommand(sessionIdRef.current, cmd);
     } catch (e) {
       setHistory(prev => [...prev, { type: "err", text: e.message }]);
       setRunning(false);
@@ -324,7 +325,7 @@ const HostTerminal = ({ tabId, dockerReady }) => {
   };
 
   const killCmd = async () => {
-    await window.electronAPI.docker.killSession(sessionIdRef.current);
+    await killSession(sessionIdRef.current);
     setHistory(prev => [...prev, { type: "err", text: "^C" }]);
     setRunning(false);
   };
@@ -337,7 +338,7 @@ const HostTerminal = ({ tabId, dockerReady }) => {
       setCmdHistory(prev => [...prev, text]);
       setHistory(prev => [...prev, { type: "stdin", text }]);
     }
-    await window.electronAPI.docker.writeSession(sessionIdRef.current, `${text}\n`);
+    await writeSession(sessionIdRef.current, `${text}\n`);
   };
 
   const onKeyDown = (e) => {
@@ -741,7 +742,7 @@ export default function NetnsVisualizer() {
 
   const closeTermTab = useCallback((tabId) => {
     if (isElectron() && window.electronAPI.docker.closeShell) {
-      window.electronAPI.docker.closeShell(`${tabId}-shell`);
+      closeShell(`${tabId}-shell`);
     }
     setTerminalTabs(prev => {
       const next = prev.filter(t => t.tabId !== tabId);

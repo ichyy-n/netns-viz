@@ -20,12 +20,13 @@ import { BridgeVlanModal } from "./ui/modals/BridgeVlanModal.jsx";
 import { IptablesModal } from "./ui/modals/IptablesModal.jsx";
 import { HostTerminal } from "./ui/terminal/HostTerminal.jsx";
 import { NsTerminal } from "./ui/terminal/NsTerminal.jsx";
-import { VethEdge } from "./ui/canvas/VethEdge.jsx";
-import { NamespaceNode } from "./ui/canvas/NamespaceNode.jsx";
-import { Canvas } from "./ui/canvas/Canvas.jsx";
+import RailCanvas from "./ui/canvas/RailCanvas.jsx";
+import BreadcrumbPill from "./ui/canvas/BreadcrumbPill.jsx";
+import BottomChrome from "./ui/canvas/BottomChrome.jsx";
+import ContextMenu from "./ui/canvas/ContextMenu.jsx";
 import { RailShell } from "./ui/shell/RailShell.jsx";
 import { CommandPalette } from "./ui/shell/CommandPalette.jsx";
-import { buildRailView } from "./logic/rail-view.js";
+import { buildRailView, autoLayout } from "./logic/rail-view.js";
 
 const isElectron = () => Boolean(window.electronAPI);
 
@@ -34,16 +35,14 @@ const isElectron = () => Boolean(window.electronAPI);
    ══════════════════════════════════════════════ */
 export default function NetnsVisualizer() {
   const [state, setState] = useState(loadGuiState);
-  const [dragging, setDragging] = useState(null);
   const [modal, setModal] = useState(null);
   const [cmdLog, setCmdLog] = useState([]);
   const [showCmd, setShowCmd] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [panning, setPanning] = useState(false);
-  const [panStart, setPanStart] = useState(null);
   const [selected, setSelected] = useState(null);
-  const svgRef = useRef(null);
+  const [contextMenu, setContextMenu] = useState(null);
+  const canvasWrapRef = useRef(null);
 
   const [dockerReady, setDockerReady] = useState(false);
   const [dockerLoading, setDockerLoading] = useState(false);
@@ -71,13 +70,23 @@ export default function NetnsVisualizer() {
   const [iptablesMap, setIptablesMap] = useState({});
   const [iptablesModal, setIptablesModal] = useState(null);
   const update = useCallback((fn) => setState(prev => { const n = JSON.parse(JSON.stringify(prev)); fn(n); return n; }), []);
-  // eslint-disable-next-line no-unused-vars
   const onDragEnd = useCallback((nsId, x, y) => {
     update((s) => {
       const ns = s.namespaces.find((n) => n.id === nsId);
       if (ns) { ns.x = x; ns.y = y; }
     });
   }, [update]);
+  const handleZoomChange = useCallback((z) => setZoom(z), []);
+  const handlePanChange = useCallback((p) => setPan(p), []);
+  const handleZoomIn = useCallback(() => setZoom((z) => Math.min(4, z * 1.1)), []);
+  const handleZoomOut = useCallback(() => setZoom((z) => Math.max(0.2, z * 0.9)), []);
+  const handleZoomReset = useCallback(() => { setZoom(1); setPan({ x: 0, y: 0 }); }, []);
+  const handleContextMenu = useCallback((ns, clientX, clientY) => {
+    const rect = canvasWrapRef.current?.getBoundingClientRect();
+    if (!rect || !ns) return;
+    setContextMenu({ visible: true, x: clientX - rect.left, y: clientY - rect.top, nsId: ns.id });
+  }, []);
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
   const swapVethEnds = useCallback((vethId) => {
     update(s => {
       const v = s.veths.find(vv => vv.id === vethId);
@@ -650,62 +659,6 @@ export default function NetnsVisualizer() {
     await applyTopologyData(r.data);
   }, [applyTopologyData]);
 
-  /* ── Drag ── */
-  const onMouseDown = useCallback((e, nsId) => {
-    e.stopPropagation();
-    const ns = namespaces.find(n => n.id === nsId);
-    setDragging({ nsId, ox: e.clientX / zoom - ns.x + pan.x / zoom, oy: e.clientY / zoom - ns.y + pan.y / zoom });
-  }, [namespaces, zoom, pan]);
-
-  useEffect(() => {
-    if (!dragging) return;
-    const onMove = e => update(s => { const ns = s.namespaces.find(n => n.id === dragging.nsId); if (ns) { ns.x = e.clientX / zoom - dragging.ox + pan.x / zoom; ns.y = e.clientY / zoom - dragging.oy + pan.y / zoom; } });
-    const onUp = () => setDragging(null);
-    window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
-    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
-  }, [dragging, update, zoom, pan]);
-
-  /* ── Pan ── */
-  const onBgMouseDown = useCallback(e => {
-    if (e.target === svgRef.current || e.target.tagName === "rect") { setPanning(true); setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y }); }
-  }, [pan]);
-
-  useEffect(() => {
-    if (!panning) return;
-    const onMove = e => setPan({ x: e.clientX - panStart.x, y: e.clientY - panStart.y });
-    const onUp = () => setPanning(false);
-    window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
-    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
-  }, [panning, panStart]);
-
-  const onWheel = useCallback((e) => {
-    e.preventDefault();
-    if (e.ctrlKey) {
-      const rect = svgRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const cx = e.clientX - rect.left;
-      const cy = e.clientY - rect.top;
-      setZoom((prevZoom) => {
-        const nextZoom = Math.min(2, Math.max(0.3, prevZoom - e.deltaY * 0.0015));
-        setPan((prevPan) => {
-          const wx = (cx - prevPan.x) / prevZoom;
-          const wy = (cy - prevPan.y) / prevZoom;
-          return {
-            x: cx - wx * nextZoom,
-            y: cy - wy * nextZoom,
-          };
-        });
-        return nextZoom;
-      });
-      return;
-    }
-
-    setPan((prev) => ({
-      x: prev.x - e.deltaX,
-      y: prev.y - e.deltaY,
-    }));
-  }, []);
-
   /* ── Command generation ── */
   const generateCommands = useCallback(() => {
     const c = ["#!/bin/bash", "# === Network Namespace Setup ===", ""];
@@ -943,9 +896,32 @@ export default function NetnsVisualizer() {
   };
 
   const ifacePos = getInterfacePositions(namespaces, bridges, veths, vlans);
+  // Phase B: retain App.jsx state handlers for Phase C context-menu / inspector wiring.
+  // Rail Phase B UI does not expose these yet; preserving prevents feature loss.
+  const _retainedForPhaseC = {
+    toggleIpForward, toggleBridgeVlanFiltering, openBridgeVlanModal, openVlanModal,
+    showIptables, openIfaceModal, deleteVlan, deleteNs, deleteBridge, deleteVeth,
+    ifacePos, showVlanSubIface,
+  };
+  void _retainedForPhaseC;
   const nsOptions = namespaces.map(n => ({ value: n.id, label: n.name }));
   const bridgeOptions = nsId => [{ value: "", label: "(none)" }, ...bridges.filter(b => b.nsId === nsId).map(b => ({ value: b.id, label: b.name }))];
-  const railView = buildRailView(state);
+  const railViewRaw = buildRailView(state);
+  const layoutPatch = autoLayout(railViewRaw.namespaces, 1240, 720);
+  const railView = Object.keys(layoutPatch).length === 0
+    ? railViewRaw
+    : (() => {
+        const nsLaid = railViewRaw.namespaces.map(n =>
+          layoutPatch[n.id] ? { ...n, ...layoutPatch[n.id] } : n,
+        );
+        return {
+          ...railViewRaw,
+          namespaces: nsLaid,
+          nsById: Object.fromEntries(nsLaid.map(n => [n.id, n])),
+          switches: nsLaid.filter(n => n.role === 'switch'),
+          hosts: nsLaid.filter(n => n.role === 'host'),
+        };
+      })();
 
   useEffect(() => {
     const h = (e) => {
@@ -958,55 +934,40 @@ export default function NetnsVisualizer() {
     return () => window.removeEventListener('keydown', h);
   }, []);
 
+  const selectedNs = selected ? railView.nsById[selected] : null;
+  const contextMenuNs = contextMenu?.nsId ? railView.nsById[contextMenu.nsId] : null;
+
   const canvasSlot = (
-    <Canvas svgRef={svgRef} panning={panning} onMouseDown={e => { setVethCtxMenu(null); onBgMouseDown(e); }} onWheel={onWheel} zoom={zoom} pan={pan}>
-      {veths.map(v => {
-        const pA = ifacePos[v.endA.id], pB = ifacePos[v.endB.id];
-        if (!pA || !pB) return null;
-        const cp1x = pA.side === "right" ? pA.x+80 : pA.x-80;
-        const cp2x = pB.side === "left" ? pB.x-80 : pB.x+80;
-        return (
-          <VethEdge key={v.id} v={v} pA={pA} pB={pB} cp1x={cp1x} cp2x={cp2x} setVethCtxMenu={setVethCtxMenu} />
-        );
-      })}
-      {namespaces.map(ns => (
-        <NamespaceNode
-          key={ns.id}
-          ns={ns}
-          selected={selected}
-          onMouseDown={onMouseDown}
-          setSelected={setSelected}
-          dockerReady={dockerReady}
-          bridges={bridges}
-          veths={veths}
-          vlans={vlans}
-          namespaces={namespaces}
-          bridgeVlans={bridgeVlans}
-          ipForwardMap={ipForwardMap}
-          iptablesMap={iptablesMap}
-          showVlanSubIface={showVlanSubIface}
-          showMacTable={showMacTable}
-          showArpTable={showArpTable}
-          showRouteTable={showRouteTable}
-          toggleIpForward={toggleIpForward}
-          showIptables={showIptables}
-          openTerminal={openTerminal}
-          deleteNs={deleteNs}
-          toggleBridgeVlanFiltering={toggleBridgeVlanFiltering}
-          deleteBridge={deleteBridge}
-          openIfaceModal={openIfaceModal}
-          openBridgeVlanModal={openBridgeVlanModal}
-          openVlanModal={openVlanModal}
-          deleteVeth={deleteVeth}
-          deleteVlan={deleteVlan}
-        />
-      ))}
-      {!namespaces.length && (
-        <text x={300} y={200} textAnchor="middle" fontSize={14} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace">
-          {dockerReady ? "「+ Namespace」で始めましょう" : isElectron() ? "まず「🐳 Docker起動」をクリック" : "Electronで起動するとDockerと連携できます"}
-        </text>
-      )}
-    </Canvas>
+    <div ref={canvasWrapRef} style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <RailCanvas
+        railView={railView}
+        selectedId={selected}
+        hoverId={hoverId}
+        zoom={zoom}
+        pan={pan}
+        onZoomChange={handleZoomChange}
+        onPanChange={handlePanChange}
+        onSelectNs={setSelected}
+        onDragEnd={onDragEnd}
+        onContextMenu={handleContextMenu}
+      />
+      <BreadcrumbPill selectedNs={selectedNs} />
+      <BottomChrome
+        zoom={zoom}
+        onReset={handleZoomReset}
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+      />
+      <ContextMenu
+        visible={!!contextMenu?.visible}
+        x={contextMenu?.x ?? 0}
+        y={contextMenu?.y ?? 0}
+        selectedNs={contextMenuNs}
+        onOpenInspector={(ns) => { if (ns) { setSelected(ns.id); } }}
+        onOpenShell={(ns) => { if (ns) { openTerminal(ns); } }}
+        onClose={closeContextMenu}
+      />
+    </div>
   );
 
   const terminalPanel = showTerminal && terminalTabs.length > 0 ? (

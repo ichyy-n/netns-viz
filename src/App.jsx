@@ -10,7 +10,6 @@ const COLORS = {
 };
 
 const NS_COLORS = ["#3b82f6","#10b981","#f59e0b","#a855f7","#06b6d4","#ef4444","#ec4899","#84cc16"];
-let idCounter = 1;
 const uid = () => `id_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 const defaultState = () => ({ namespaces: [], bridges: [], veths: [], vlans: [], bridgeVlans: [], routes: [], commands: [] });
 const GUI_STATE_KEY = "netns-viz:gui-state:v1";
@@ -514,7 +513,7 @@ export default function NetnsVisualizer() {
   const logEndRef = useRef(null);
 
   const { namespaces, bridges, veths, vlans, bridgeVlans, routes, commands } = state;
-  const [showVlanSubIface, setShowVlanSubIface] = useState(false);
+  const [showVlanSubIface] = useState(false);
   const [ipForwardMap, setIpForwardMap] = useState({});
   const [iptablesMap, setIptablesMap] = useState({});
   const [iptablesModal, setIptablesModal] = useState(null);

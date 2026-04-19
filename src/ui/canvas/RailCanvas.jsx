@@ -288,6 +288,46 @@ export default function RailCanvas({
             );
           })}
         </g>
+        <g transform={`translate(${VIEWBOX_W - 200}, ${VIEWBOX_H - 86})`}>
+          <rect
+            width={180}
+            height={70}
+            rx={6}
+            fill={TOKENS.surface}
+            stroke={TOKENS.line}
+            strokeWidth={1}
+          />
+          <text
+            x={12}
+            y={16}
+            fill={TOKENS.textDim}
+            fontSize={9}
+            fontFamily={TOKENS.fontMono}
+            letterSpacing="0.15em"
+          >
+            LEGEND
+          </text>
+          <line x1={12} y1={30} x2={32} y2={30} stroke={TOKENS.vlan10} strokeWidth={2} />
+          <text x={38} y={33} fontSize={10} fill={TOKENS.text}>
+            VLAN 10 access
+          </text>
+          <line x1={12} y1={46} x2={32} y2={46} stroke={TOKENS.vlan20} strokeWidth={2} />
+          <text x={38} y={49} fontSize={10} fill={TOKENS.text}>
+            VLAN 20 access
+          </text>
+          <line
+            x1={12}
+            y1={62}
+            x2={32}
+            y2={62}
+            stroke={TOKENS.trunk}
+            strokeWidth={2}
+            strokeDasharray="4 3"
+          />
+          <text x={38} y={65} fontSize={10} fill={TOKENS.text}>
+            802.1Q trunk
+          </text>
+        </g>
       </svg>
     </div>
   );

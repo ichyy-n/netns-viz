@@ -21,16 +21,16 @@ function vlanSoftOf(vlan) {
 }
 
 function headerFillOf(role, vlan) {
-  if (role === 'switch') return TOKENS.magentaSoft;
+  if (role === 'switch') return 'rgba(217,104,199,0.08)';
   if (vlan === 10) return TOKENS.vlan10Soft;
   if (vlan === 20) return TOKENS.vlan20Soft;
   return TOKENS.surfaceHi;
 }
 
 const PORT_PILLS = [
-  { label: 'T', main: 'trunk', soft: 'trunkSoft' },
   { label: '10', main: 'vlan10', soft: 'vlan10Soft' },
-  { label: '20', main: 'vlan20', soft: 'vlan20Soft' },
+  { label: '10', main: 'vlan10', soft: 'vlan10Soft' },
+  { label: 'T', main: 'trunk', soft: 'trunkSoft' },
 ];
 
 export default function NodeCard({
@@ -85,7 +85,7 @@ export default function NodeCard({
       <rect x={0} y={0} width={NS_W} height={32} rx={10} fill={headerFill} />
       <rect x={0} y={22} width={NS_W} height={10} fill={headerFill} />
       <line x1={0} y1={32} x2={NS_W} y2={32} stroke={TOKENS.line} strokeWidth={0.5} />
-      <circle cx={18} cy={16} r={9} fill={accent} fillOpacity={0.16} />
+      <circle cx={18} cy={16} r={9} fill={accent + '28'} />
       <g transform="translate(10, 8)">
         <IconStroke d={iconPath} size={16} color={accent} />
       </g>
@@ -134,7 +134,7 @@ export default function NodeCard({
           </text>
           <g transform="translate(14, 82)">
             {PORT_PILLS.map((p, i) => (
-              <g key={p.label} transform={`translate(${i * 22}, 0)`}>
+              <g key={i} transform={`translate(${i * 22}, 0)`}>
                 <rect
                   width={18}
                   height={18}

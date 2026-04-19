@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { COLORS, NS_COLORS, NS_W, NS_HEADER, NS_ITEM_H } from "./theme.js";
-const uid = () => `id_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+import { uid } from "./logic/ids.js";
 const defaultState = () => ({ namespaces: [], bridges: [], veths: [], vlans: [], bridgeVlans: [], routes: [], commands: [] });
 const GUI_STATE_KEY = "netns-viz:gui-state:v1";
 

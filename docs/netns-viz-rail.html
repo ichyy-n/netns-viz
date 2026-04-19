@@ -1,0 +1,1654 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>netns-viz · B · Rail</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+JP:wght@400;500;600&display=swap" rel="stylesheet"/>
+<style>
+html,body{margin:0;padding:0;background:#0a0a0c;font-family:'Inter',system-ui,sans-serif;color:#e8e8ee;overflow:hidden}
+*{box-sizing:border-box}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#26262e;border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:#3a3a44}
+button:focus,input:focus{outline:none}
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+// Shared design tokens + ch01 VLAN topology data + i18n
+
+const TOKENS = {
+  // Deep neutral palette (Linear/Raycast-inspired)
+  bg: '#0a0a0c',
+  bg2: '#0f0f12',
+  surface: '#141418',
+  surface2: '#1a1a20',
+  surfaceHi: '#22222a',
+  line: '#26262e',
+  lineSoft: '#1e1e24',
+  text: '#e8e8ee',
+  textMid: '#a8a8b4',
+  textDim: '#6a6a76',
+  textFaint: '#44444d',
+
+  // Functional accents — muted but saturated
+  indigo: '#7b7ee8',       // primary action (Linear-ish)
+  indigoSoft: 'rgba(123,126,232,0.12)',
+  red: '#f15f5f',          // Raycast red
+  redSoft: 'rgba(241,95,95,0.12)',
+  green: '#5ec08a',
+  greenSoft: 'rgba(94,192,138,0.12)',
+  amber: '#e8b15e',
+  amberSoft: 'rgba(232,177,94,0.14)',
+  sky: '#5ea3e8',
+  skySoft: 'rgba(94,163,232,0.14)',
+  magenta: '#d968c7',
+  magentaSoft: 'rgba(217,104,199,0.14)',
+
+  // VLAN color coding
+  vlan10: '#5ea3e8',
+  vlan10Soft: 'rgba(94,163,232,0.16)',
+  vlan20: '#e8b15e',
+  vlan20Soft: 'rgba(232,177,94,0.16)',
+  trunk: '#d968c7',
+  trunkSoft: 'rgba(217,104,199,0.18)',
+
+  fontSans: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
+  fontMono: '"JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace',
+  fontJp: '"Inter", "Hiragino Sans", "Noto Sans JP", -apple-system, system-ui, sans-serif',
+};
+
+// ch01 VLAN topology, re-positioned for a natural L2 diagram
+const CH01 = {
+  namespaces: [
+    // Top row: switches
+    { id: 'sw1', name: 'sw1', role: 'switch', x: 340, y: 120 },
+    { id: 'sw2', name: 'sw2', role: 'switch', x: 860, y: 120 },
+    // Bottom row: PCs
+    { id: 'pc1', name: 'pc1', role: 'host', vlan: 10, x: 120, y: 420, ip: '192.168.10.1/24' },
+    { id: 'pc2', name: 'pc2', role: 'host', vlan: 10, x: 360, y: 420, ip: '192.168.10.2/24' },
+    { id: 'pc3', name: 'pc3', role: 'host', vlan: 20, x: 800, y: 420, ip: '192.168.20.1/24' },
+    { id: 'pc4', name: 'pc4', role: 'host', vlan: 20, x: 1040, y: 420, ip: '192.168.20.2/24' },
+  ],
+  bridges: [
+    { id: 'br-sw1', nsId: 'sw1', name: 'br0', vlanFiltering: true },
+    { id: 'br-sw2', nsId: 'sw2', name: 'br0', vlanFiltering: true },
+  ],
+  links: [
+    // sw1 ports
+    { id: 'l1', a: { ns: 'sw1', port: 'veth-sw1-p1', side: 'bl' }, b: { ns: 'pc1', port: 'veth-pc1', side: 't' }, vlan: 10, kind: 'access' },
+    { id: 'l2', a: { ns: 'sw1', port: 'veth-sw1-p2', side: 'b' },  b: { ns: 'pc2', port: 'veth-pc2', side: 't' }, vlan: 10, kind: 'access' },
+    // trunk
+    { id: 'lt', a: { ns: 'sw1', port: 'veth-sw1-trunk', side: 'r' }, b: { ns: 'sw2', port: 'veth-sw2-trunk', side: 'l' }, vlans: [10, 20], kind: 'trunk' },
+    // sw2 ports
+    { id: 'l3', a: { ns: 'sw2', port: 'veth-sw2-p1', side: 'b' },  b: { ns: 'pc3', port: 'veth-pc3', side: 't' }, vlan: 20, kind: 'access' },
+    { id: 'l4', a: { ns: 'sw2', port: 'veth-sw2-p2', side: 'br' }, b: { ns: 'pc4', port: 'veth-pc4', side: 't' }, vlan: 20, kind: 'access' },
+  ],
+};
+
+// Labels (JP/EN)
+const LABELS = {
+  jp: {
+    app: 'netns-viz',
+    file: 'ファイル', new: '新規', open: '開く', save: '保存', export: 'エクスポート',
+    docker: 'Docker 起動', dockerOn: 'Docker 接続中',
+    addNs: '名前空間', addBridge: 'ブリッジ', addVeth: 'veth ペア', addRoute: 'ルート', addVlan: 'VLAN',
+    apply: 'トポロジを適用', terminal: 'ターミナル', cmdLog: 'コマンドログ',
+    inspector: 'インスペクタ', properties: 'プロパティ', nodes: 'ノード', topology: 'トポロジ',
+    layers: 'レイヤー', switches: 'スイッチ', hosts: 'ホスト', interfaces: 'インターフェース',
+    vlans: 'VLAN', routes: 'ルート',
+    search: '検索…', searchShort: 'コマンドを実行… (⌘K)',
+    sample: 'ch01 · VLAN トランク',
+    sampleSub: '2 つのスイッチ間をトランクで接続、アクセス VLAN で分離',
+    pvid: 'PVID', tagged: 'タグ付き', untagged: 'アンタグ',
+    access: 'アクセス', trunk: 'トランク',
+    status: '実行中', stopped: '停止', idle: 'アイドル',
+    zoom: 'ズーム', fit: 'フィット',
+    quickActions: 'クイックアクション',
+    recent: '最近使用', createNs: '新しい名前空間を作成',
+    createVeth: 'veth ペアを作成', toggleVlan: 'VLAN フィルタを切り替え',
+    runPing: 'ping を実行', openTerm: 'ターミナルを開く',
+    connectBr: 'ブリッジに接続',
+    bridge: 'ブリッジ',
+    mtu: 'MTU',
+    state: '状態',
+    up: 'UP', down: 'DOWN',
+    viewAs: '表示',
+    canvas: 'キャンバス', list: 'リスト', table: 'テーブル',
+    topLeft: 'ネットワーク', bottomLeft: 'オブジェクト',
+  },
+  en: {
+    app: 'netns-viz',
+    file: 'File', new: 'New', open: 'Open', save: 'Save', export: 'Export',
+    docker: 'Start Docker', dockerOn: 'Docker connected',
+    addNs: 'Namespace', addBridge: 'Bridge', addVeth: 'Veth pair', addRoute: 'Route', addVlan: 'VLAN',
+    apply: 'Apply topology', terminal: 'Terminal', cmdLog: 'Command log',
+    inspector: 'Inspector', properties: 'Properties', nodes: 'Nodes', topology: 'Topology',
+    layers: 'Layers', switches: 'Switches', hosts: 'Hosts', interfaces: 'Interfaces',
+    vlans: 'VLANs', routes: 'Routes',
+    search: 'Search…', searchShort: 'Run a command… (⌘K)',
+    sample: 'ch01 · VLAN trunk',
+    sampleSub: 'Two L2 switches linked by a trunk, hosts isolated by access VLAN',
+    pvid: 'PVID', tagged: 'tagged', untagged: 'untagged',
+    access: 'access', trunk: 'trunk',
+    status: 'Running', stopped: 'Stopped', idle: 'Idle',
+    zoom: 'Zoom', fit: 'Fit',
+    quickActions: 'Quick actions',
+    recent: 'Recents', createNs: 'Create namespace',
+    createVeth: 'Create veth pair', toggleVlan: 'Toggle VLAN filtering',
+    runPing: 'Run ping', openTerm: 'Open terminal',
+    connectBr: 'Attach to bridge',
+    bridge: 'Bridge',
+    mtu: 'MTU',
+    state: 'State',
+    up: 'UP', down: 'DOWN',
+    viewAs: 'View',
+    canvas: 'Canvas', list: 'List', table: 'Table',
+    topLeft: 'Network', bottomLeft: 'Objects',
+  },
+};
+
+// Icons (stroked, 1.5 width — Linear-ish)
+const IconStroke = ({ d, size = 14, color = 'currentColor', fill = 'none', style }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, ...style }}>
+    {typeof d === 'string' ? <path d={d} /> : d}
+  </svg>
+);
+
+const ICONS = {
+  plus: 'M12 5v14M5 12h14',
+  search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></>,
+  dot: <circle cx="12" cy="12" r="3" fill="currentColor" />,
+  chevR: 'm9 6 6 6-6 6',
+  chevD: 'm6 9 6 6 6-6',
+  play: 'M6 4 20 12 6 20Z',
+  stop: 'M6 6h12v12H6z',
+  terminal: <><path d="m5 7 4 5-4 5" /><path d="M13 17h6" /></>,
+  grid: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
+  list: <><path d="M8 6h13M8 12h13M8 18h13" /><circle cx="4" cy="6" r="0.5" fill="currentColor" /><circle cx="4" cy="12" r="0.5" fill="currentColor" /><circle cx="4" cy="18" r="0.5" fill="currentColor" /></>,
+  table: <><rect x="3" y="4" width="18" height="16" rx="1.5" /><path d="M3 10h18M9 4v16" /></>,
+  switch: <><rect x="3" y="8" width="18" height="9" rx="1.5" /><path d="M7 12h.01M11 12h.01M15 12h.01" /></>,
+  host: <><rect x="4" y="4" width="16" height="12" rx="1.5" /><path d="M8 20h8M12 16v4" /></>,
+  bridge: <><path d="M3 10c0-2 2-4 4-4h10c2 0 4 2 4 4" /><path d="M3 10v6h18v-6" /><path d="M8 16v3M16 16v3" /></>,
+  link: <><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1" /><path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1" /></>,
+  route: 'm5 9 4-4 4 4M9 5v9a4 4 0 0 0 4 4h2l4-4-4-4',
+  folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z',
+  save: 'M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2ZM7 3v5h8V3M7 21v-8h10v8',
+  settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" /></>,
+  vlan: <><rect x="3" y="5" width="18" height="5" rx="1" /><rect x="3" y="14" width="18" height="5" rx="1" /></>,
+  tag: <><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82Z" /><circle cx="7" cy="7" r="1.2" fill="currentColor" /></>,
+  command: 'M15 6a3 3 0 1 1 3 3h-3V6ZM9 6a3 3 0 1 0-3 3h3V6ZM9 18a3 3 0 1 1-3-3h3v3ZM15 18a3 3 0 1 0 3-3h-3v3ZM9 9h6v6H9z',
+  filter: 'M3 4h18l-7 10v5l-4 2v-7Z',
+  close: 'M6 6l12 12M18 6 6 18',
+  dock: 'M6 3h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm3 0v18',
+  moon: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z',
+  bolt: 'm13 2-8 12h7l-1 8 8-12h-7Z',
+  eye: <><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></>,
+  kebab: <><circle cx="12" cy="5" r="1.2" fill="currentColor" /><circle cx="12" cy="12" r="1.2" fill="currentColor" /><circle cx="12" cy="19" r="1.2" fill="currentColor" /></>,
+  sparkle: 'M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8',
+  globe: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></>,
+};
+
+Object.assign(window, { TOKENS, CH01, LABELS, IconStroke, ICONS });
+
+// Topology diagram — shared canvas visualization used inside each variation
+// Renders the ch01 VLAN topology as an SVG.
+//
+// Props: { width, height, variant, lang }
+//   variant: 'orbit' | 'rail' | 'shell' — subtle styling differences
+//   lang: 'jp' | 'en'
+
+const NS_W = 200;
+const NS_H_SWITCH = 110;
+const NS_H_HOST = 94;
+
+function NodeCoords(n) {
+  // Center of the node
+  const h = n.role === 'switch' ? NS_H_SWITCH : NS_H_HOST;
+  return { cx: n.x + NS_W / 2, cy: n.y + h / 2, w: NS_W, h };
+}
+
+function PortAnchor(n, side) {
+  const { cx, cy, w, h } = NodeCoords(n);
+  const hw = w / 2, hh = h / 2;
+  switch (side) {
+    case 't':  return { x: cx,          y: cy - hh };
+    case 'b':  return { x: cx,          y: cy + hh };
+    case 'l':  return { x: cx - hw,     y: cy };
+    case 'r':  return { x: cx + hw,     y: cy };
+    case 'bl': return { x: cx - hw/2,   y: cy + hh };
+    case 'br': return { x: cx + hw/2,   y: cy + hh };
+    case 'tl': return { x: cx - hw/2,   y: cy - hh };
+    case 'tr': return { x: cx + hw/2,   y: cy - hh };
+    default:   return { x: cx,          y: cy };
+  }
+}
+
+function vlanColor(vid) {
+  if (vid === 10) return TOKENS.vlan10;
+  if (vid === 20) return TOKENS.vlan20;
+  return TOKENS.textMid;
+}
+
+function LinkPath({ a, b, stroke, dashed, highlighted }) {
+  // Smooth bezier — horizontal pull for trunks, vertical for access
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const horizontal = Math.abs(dx) > Math.abs(dy);
+  const c = horizontal
+    ? `M${a.x},${a.y} C${a.x + dx * 0.4},${a.y} ${b.x - dx * 0.4},${b.y} ${b.x},${b.y}`
+    : `M${a.x},${a.y} C${a.x},${a.y + dy * 0.45} ${b.x},${b.y - dy * 0.45} ${b.x},${b.y}`;
+  return (
+    <path
+      d={c}
+      stroke={stroke}
+      strokeWidth={highlighted ? 2.5 : 1.6}
+      fill="none"
+      strokeDasharray={dashed ? '5 4' : 'none'}
+      strokeLinecap="round"
+      opacity={highlighted ? 1 : 0.85}
+    />
+  );
+}
+
+function NodeCard({ n, selected, showPorts, variant, L }) {
+  const { w, h } = NodeCoords(n);
+  const isSwitch = n.role === 'switch';
+  const vlanAccent = isSwitch ? TOKENS.magenta : vlanColor(n.vlan);
+  const icon = isSwitch ? ICONS.switch : ICONS.host;
+
+  return (
+    <g transform={`translate(${n.x},${n.y})`}>
+      {/* soft shadow */}
+      <rect x={0} y={3} width={w} height={h} rx={10}
+        fill="rgba(0,0,0,0.35)" filter="blur(6px)" opacity={0.5} />
+      {/* body */}
+      <rect x={0} y={0} width={w} height={h} rx={10}
+        fill={TOKENS.surface2}
+        stroke={selected ? vlanAccent : TOKENS.line}
+        strokeWidth={selected ? 1.5 : 1} />
+      {/* header strip */}
+      <rect x={0} y={0} width={w} height={32} rx={10}
+        fill={isSwitch ? 'rgba(217,104,199,0.08)' : (n.vlan === 10 ? TOKENS.vlan10Soft : TOKENS.vlan20Soft)} />
+      <rect x={0} y={22} width={w} height={10}
+        fill={isSwitch ? 'rgba(217,104,199,0.08)' : (n.vlan === 10 ? TOKENS.vlan10Soft : TOKENS.vlan20Soft)} />
+      <line x1={0} y1={32} x2={w} y2={32} stroke={TOKENS.line} strokeWidth={0.5} />
+
+      {/* icon pill */}
+      <circle cx={18} cy={16} r={9} fill={vlanAccent + '28'} />
+      <g transform="translate(10,8)" style={{ color: vlanAccent }}>
+        <IconStroke d={icon} size={16} />
+      </g>
+
+      {/* name */}
+      <text x={34} y={20} fill={TOKENS.text} fontSize={13} fontWeight={600}
+        fontFamily={TOKENS.fontMono} letterSpacing="-0.01em">{n.name}</text>
+
+      {/* role tag */}
+      <text x={w - 10} y={20} textAnchor="end" fill={TOKENS.textDim}
+        fontSize={9.5} fontFamily={TOKENS.fontMono} letterSpacing="0.08em">
+        {isSwitch ? 'L2' : `VLAN ${n.vlan}`}
+      </text>
+
+      {/* body content */}
+      {isSwitch ? (
+        <g>
+          <text x={14} y={52} fill={TOKENS.textMid} fontSize={10.5}
+            fontFamily={TOKENS.fontMono} letterSpacing="0.06em">br0 · vlan_filtering 1</text>
+          <text x={14} y={70} fill={TOKENS.textDim} fontSize={10}
+            fontFamily={TOKENS.fontMono}>3 ports · 2 VLANs</text>
+          {/* port dots */}
+          <g transform={`translate(14,82)`}>
+            {[10, 10, 'T'].map((v, i) => (
+              <g key={i} transform={`translate(${i * 22},0)`}>
+                <rect x={0} y={0} width={18} height={18} rx={4}
+                  fill={v === 'T' ? TOKENS.trunkSoft : (v === 10 ? TOKENS.vlan10Soft : TOKENS.vlan20Soft)}
+                  stroke={v === 'T' ? TOKENS.trunk : (v === 10 ? TOKENS.vlan10 : TOKENS.vlan20)}
+                  strokeWidth={0.75} strokeOpacity={0.5} />
+                <text x={9} y={13} textAnchor="middle"
+                  fill={v === 'T' ? TOKENS.trunk : (v === 10 ? TOKENS.vlan10 : TOKENS.vlan20)}
+                  fontSize={9} fontFamily={TOKENS.fontMono} fontWeight={600}>
+                  {v === 'T' ? 'T' : v}
+                </text>
+              </g>
+            ))}
+          </g>
+        </g>
+      ) : (
+        <g>
+          <text x={14} y={52} fill={TOKENS.text} fontSize={11}
+            fontFamily={TOKENS.fontMono}>{n.ip}</text>
+          <text x={14} y={68} fill={TOKENS.textDim} fontSize={9.5}
+            fontFamily={TOKENS.fontMono} letterSpacing="0.06em">veth-{n.name} · UP</text>
+          {/* vlan pill */}
+          <rect x={14} y={76} width={56} height={14} rx={3}
+            fill={n.vlan === 10 ? TOKENS.vlan10Soft : TOKENS.vlan20Soft}
+            stroke={n.vlan === 10 ? TOKENS.vlan10 : TOKENS.vlan20}
+            strokeOpacity={0.4} strokeWidth={0.75} />
+          <text x={42} y={86} textAnchor="middle"
+            fill={n.vlan === 10 ? TOKENS.vlan10 : TOKENS.vlan20}
+            fontSize={9} fontFamily={TOKENS.fontMono} fontWeight={600} letterSpacing="0.08em">
+            VLAN {n.vlan}
+          </text>
+        </g>
+      )}
+
+      {/* corner status dot */}
+      <circle cx={w - 14} cy={h - 12} r={3} fill={TOKENS.green} opacity={0.85} />
+    </g>
+  );
+}
+
+function TopologyDiagram({ width, height, variant = 'orbit', lang = 'en', showLegend = true, selectedId = 'sw1', tx = 0, ty = 0, scale = 1 }) {
+  const L = LABELS[lang];
+
+  // Build anchors
+  const nsById = {};
+  CH01.namespaces.forEach(n => nsById[n.id] = n);
+
+  // Compute link endpoints
+  const links = CH01.links.map(l => {
+    const a = PortAnchor(nsById[l.a.ns], l.a.side);
+    const b = PortAnchor(nsById[l.b.ns], l.b.side);
+    return { ...l, pa: a, pb: b };
+  });
+
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block' }}>
+      <defs>
+        <pattern id={`grid-${variant}`} width="32" height="32" patternUnits="userSpaceOnUse">
+          <circle cx={1} cy={1} r={0.7} fill={TOKENS.textFaint} opacity={0.55} />
+        </pattern>
+        <radialGradient id={`spot-${variant}`} cx="50%" cy="30%" r="60%">
+          <stop offset="0%" stopColor={TOKENS.indigo} stopOpacity={0.08} />
+          <stop offset="100%" stopColor={TOKENS.indigo} stopOpacity={0} />
+        </radialGradient>
+      </defs>
+
+      <rect width={width} height={height} fill={TOKENS.bg} />
+      <rect width={width} height={height} fill={`url(#grid-${variant})`} />
+      <rect width={width} height={height} fill={`url(#spot-${variant})`} />
+
+      <g transform={`translate(${tx},${ty}) scale(${scale})`}>
+        {/* VLAN territory halos (orbit & rail variants) */}
+        {variant !== 'shell' && (
+          <g opacity={0.5}>
+            {/* VLAN 10 halo */}
+            <ellipse cx={280} cy={480} rx={260} ry={130} fill={TOKENS.vlan10Soft} />
+            <text x={280} y={630} textAnchor="middle" fill={TOKENS.vlan10} fontSize={10}
+              fontFamily={TOKENS.fontMono} letterSpacing="0.2em" opacity={0.7}>VLAN 10 · 192.168.10.0/24</text>
+            {/* VLAN 20 halo */}
+            <ellipse cx={960} cy={480} rx={260} ry={130} fill={TOKENS.vlan20Soft} />
+            <text x={960} y={630} textAnchor="middle" fill={TOKENS.vlan20} fontSize={10}
+              fontFamily={TOKENS.fontMono} letterSpacing="0.2em" opacity={0.7}>VLAN 20 · 192.168.20.0/24</text>
+          </g>
+        )}
+
+        {/* Links */}
+        {links.map(l => {
+          const color = l.kind === 'trunk' ? TOKENS.trunk : vlanColor(l.vlan);
+          return (
+            <g key={l.id}>
+              <LinkPath a={l.pa} b={l.pb} stroke={color} dashed={l.kind === 'trunk'} />
+              {/* endpoints */}
+              <circle cx={l.pa.x} cy={l.pa.y} r={3} fill={color} />
+              <circle cx={l.pb.x} cy={l.pb.y} r={3} fill={color} />
+              {/* label */}
+              {l.kind === 'trunk' && (() => {
+                const mx = (l.pa.x + l.pb.x) / 2;
+                const my = (l.pa.y + l.pb.y) / 2;
+                return (
+                  <g transform={`translate(${mx},${my})`}>
+                    <rect x={-34} y={-10} width={68} height={20} rx={4}
+                      fill={TOKENS.bg} stroke={TOKENS.trunk} strokeWidth={0.75} strokeOpacity={0.5} />
+                    <text x={0} y={4} textAnchor="middle" fill={TOKENS.trunk}
+                      fontSize={9.5} fontWeight={600} fontFamily={TOKENS.fontMono}
+                      letterSpacing="0.1em">TRUNK 10,20</text>
+                  </g>
+                );
+              })()}
+            </g>
+          );
+        })}
+
+        {/* Nodes */}
+        {CH01.namespaces.map(n => (
+          <NodeCard key={n.id} n={n} selected={selectedId === n.id} variant={variant} L={L} />
+        ))}
+      </g>
+
+      {/* Legend (bottom-right of diagram) */}
+      {showLegend && (
+        <g transform={`translate(${width - 200}, ${height - 86})`}>
+          <rect x={0} y={0} width={180} height={70} rx={6}
+            fill={TOKENS.surface} stroke={TOKENS.line} strokeWidth={1} />
+          <text x={12} y={16} fill={TOKENS.textDim} fontSize={9}
+            fontFamily={TOKENS.fontMono} letterSpacing="0.15em">LEGEND</text>
+
+          <line x1={12} y1={30} x2={32} y2={30} stroke={TOKENS.vlan10} strokeWidth={2} />
+          <text x={38} y={33} fill={TOKENS.textMid} fontSize={10} fontFamily={TOKENS.fontMono}>VLAN 10 access</text>
+
+          <line x1={12} y1={46} x2={32} y2={46} stroke={TOKENS.vlan20} strokeWidth={2} />
+          <text x={38} y={49} fill={TOKENS.textMid} fontSize={10} fontFamily={TOKENS.fontMono}>VLAN 20 access</text>
+
+          <line x1={12} y1={62} x2={32} y2={62} stroke={TOKENS.trunk} strokeWidth={2} strokeDasharray="4 3" />
+          <text x={38} y={65} fill={TOKENS.textMid} fontSize={10} fontFamily={TOKENS.fontMono}>802.1Q trunk</text>
+        </g>
+      )}
+    </svg>
+  );
+}
+
+Object.assign(window, { TopologyDiagram, NodeCoords, PortAnchor, vlanColor });
+
+// B · Rail — interactive prototype
+// Full-viewport Linear-inspired workspace for netns-viz.
+// Selection, hover, tab switching (Canvas/List/Table), inline edits,
+// command palette (⌘K), node context menu, and a collapsible command log.
+
+// ─── helpers ─────────────────────────────────────────────────────────────
+
+const RailCtx = React.createContext(null);
+const useRail = () => React.useContext(RailCtx);
+
+function useHover() {
+  const [h, setH] = React.useState(false);
+  return [h, { onMouseEnter: () => setH(true), onMouseLeave: () => setH(false) }];
+}
+
+function Chip({ children, color, soft, size = 'sm', style }) {
+  const pad = size === 'sm' ? '2px 6px' : '3px 8px';
+  const fs = size === 'sm' ? 9.5 : 10.5;
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 4,
+      padding: pad, fontSize: fs, fontFamily: TOKENS.fontMono,
+      fontWeight: 600, letterSpacing: '0.05em',
+      background: soft, color, borderRadius: 3, ...style,
+    }}>{children}</span>
+  );
+}
+
+function Dot({ color, size = 6, style }) {
+  return <span style={{ width: size, height: size, borderRadius: size/2, background: color, display: 'inline-block', ...style }} />;
+}
+
+// Build port map per switch from CH01.links — used in table/inspector
+function buildPortMap() {
+  const map = { sw1: [], sw2: [] };
+  CH01.links.forEach(l => {
+    [l.a, l.b].forEach(end => {
+      if (end.ns === 'sw1' || end.ns === 'sw2') {
+        if (l.kind === 'trunk') {
+          [10, 20].forEach(vid => map[end.ns].push({ port: end.port, vid, flags: 'tagged', kind: 'trunk', linkId: l.id }));
+        } else {
+          map[end.ns].push({ port: end.port, vid: l.vlan, flags: 'PVID · untagged', kind: 'access', linkId: l.id });
+        }
+      }
+    });
+  });
+  return map;
+}
+
+// ─── left rail ──────────────────────────────────────────────────────────
+
+function LeftRail() {
+  const { lang, L, selectedId, setSelected, hoverId, setHover, showLog, setShowLog } = useRail();
+  const [expand, setExpand] = React.useState({ switches: true, hosts: true, vlans: true, links: true });
+
+  const Section = ({ k, label, count }) => (
+    <div onClick={() => setExpand(e => ({ ...e, [k]: !e[k] }))}
+      style={{ padding: '14px 12px 4px', cursor: 'pointer',
+        display: 'flex', alignItems: 'center', gap: 6,
+        fontSize: 9.5, color: TOKENS.textDim, fontFamily: TOKENS.fontMono,
+        letterSpacing: '0.18em', fontWeight: 500, userSelect: 'none' }}>
+      <IconStroke d={ICONS.chevD} size={8} color={TOKENS.textDim}
+        style={{ transform: expand[k] ? 'none' : 'rotate(-90deg)', transition: 'transform .15s' }} />
+      <span style={{ flex: 1 }}>{label.toUpperCase()}</span>
+      {count != null && <span style={{ color: TOKENS.textFaint }}>{count}</span>}
+    </div>
+  );
+
+  const Item = ({ id, label, icon, dot, badge, selectable = true, muted = false }) => {
+    const active = selectedId === id;
+    const hovered = hoverId === id;
+    return (
+      <div
+        onMouseEnter={() => setHover(id)}
+        onMouseLeave={() => setHover(null)}
+        onClick={() => selectable && setSelected(id)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '5px 10px 5px 22px',
+          fontSize: 12, fontFamily: TOKENS.fontMono,
+          color: active ? TOKENS.text : (muted ? TOKENS.textDim : TOKENS.textMid),
+          background: active ? TOKENS.surface2 : (hovered ? TOKENS.lineSoft : 'transparent'),
+          borderLeft: active ? `2px solid ${TOKENS.indigo}` : '2px solid transparent',
+          cursor: selectable ? 'pointer' : 'default', height: 26,
+          transition: 'background .08s',
+        }}>
+        {icon && <IconStroke d={icon} size={12} color={active ? TOKENS.indigo : TOKENS.textDim} />}
+        {dot && <Dot color={dot} />}
+        <span style={{ flex: 1, fontWeight: active ? 500 : 400, letterSpacing: '-0.003em',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+        {badge && <span style={{ fontSize: 10, color: TOKENS.textDim }}>{badge}</span>}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ width: 244, borderRight: `1px solid ${TOKENS.line}`,
+      background: TOKENS.bg2, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ flex: 1, overflow: 'auto', paddingBottom: 8 }}>
+        <Section k="proj" label={L.topLeft} />
+        <Item id="ch01" label={lang === 'jp' ? 'ch01 · VLAN トランク' : 'ch01 · VLAN trunk'}
+          icon={ICONS.folder} selectable={false} />
+
+        {expand.switches !== false && <Section k="switches" label={L.switches} count={2} />}
+        {expand.switches && (<>
+          <Item id="sw1" label="sw1" icon={ICONS.switch} badge="3 ports" />
+          <Item id="sw2" label="sw2" icon={ICONS.switch} badge="3 ports" />
+        </>)}
+
+        <Section k="hosts" label={L.hosts} count={4} />
+        {expand.hosts && (<>
+          <Item id="pc1" label="pc1" icon={ICONS.host} dot={TOKENS.vlan10} badge="192.168.10.1" />
+          <Item id="pc2" label="pc2" icon={ICONS.host} dot={TOKENS.vlan10} badge="192.168.10.2" />
+          <Item id="pc3" label="pc3" icon={ICONS.host} dot={TOKENS.vlan20} badge="192.168.20.1" />
+          <Item id="pc4" label="pc4" icon={ICONS.host} dot={TOKENS.vlan20} badge="192.168.20.2" />
+        </>)}
+
+        <Section k="vlans" label={L.vlans} count={2} />
+        {expand.vlans && (<>
+          <Item id="vlan10" label="VLAN 10" icon={ICONS.vlan} dot={TOKENS.vlan10} badge="2 hosts" />
+          <Item id="vlan20" label="VLAN 20" icon={ICONS.vlan} dot={TOKENS.vlan20} badge="2 hosts" />
+        </>)}
+
+        <Section k="links" label={lang === 'jp' ? 'リンク' : 'Links'} count={5} />
+        {expand.links && (<>
+          <Item id="l1" label="sw1-p1 ⇄ pc1" icon={ICONS.link} muted />
+          <Item id="l2" label="sw1-p2 ⇄ pc2" icon={ICONS.link} muted />
+          <Item id="lt" label="sw1 ⇄ sw2 (trunk)" icon={ICONS.link} dot={TOKENS.trunk} />
+          <Item id="l3" label="sw2-p1 ⇄ pc3" icon={ICONS.link} muted />
+          <Item id="l4" label="sw2-p2 ⇄ pc4" icon={ICONS.link} muted />
+        </>)}
+      </div>
+
+      <CommandLog open={showLog} setOpen={setShowLog} />
+    </div>
+  );
+}
+
+// ─── command log (collapsible) ──────────────────────────────────────────
+
+function CommandLog({ open, setOpen }) {
+  const { lang, L } = useRail();
+  const logs = [
+    { ok: true, t: '22:08:14', cmd: 'ip netns add sw1' },
+    { ok: true, t: '22:08:14', cmd: 'ip netns add sw2' },
+    { ok: true, t: '22:08:15', cmd: 'ip link add br0 type bridge' },
+    { ok: true, t: '22:08:15', cmd: 'ip link set br0 type bridge vlan_filtering 1' },
+    { ok: true, t: '22:08:16', cmd: 'bridge vlan add vid 10 dev veth-sw1-p1 pvid untagged' },
+    { ok: true, t: '22:08:16', cmd: 'bridge vlan add vid 10 dev veth-sw1-trunk tagged' },
+    { ok: true, t: '22:08:17', cmd: 'bridge vlan add vid 20 dev veth-sw1-trunk tagged' },
+    { ok: true, t: '22:08:18', cmd: 'ip addr add 192.168.10.1/24 dev veth-pc1' },
+  ];
+  return (
+    <div style={{ borderTop: `1px solid ${TOKENS.line}`, background: TOKENS.surface,
+      maxHeight: open ? 200 : 32, transition: 'max-height .2s', overflow: 'hidden', flexShrink: 0 }}>
+      <div onClick={() => setOpen(!open)} style={{
+        height: 32, padding: '0 12px', display: 'flex', alignItems: 'center', gap: 6,
+        cursor: 'pointer', userSelect: 'none', fontSize: 10, fontFamily: TOKENS.fontMono,
+        color: TOKENS.textDim, letterSpacing: '0.15em', fontWeight: 500 }}>
+        <IconStroke d={ICONS.chevD} size={8} color={TOKENS.textDim}
+          style={{ transform: open ? 'none' : 'rotate(-90deg)' }} />
+        <span style={{ flex: 1 }}>{L.cmdLog.toUpperCase()}</span>
+        <Chip color={TOKENS.green} soft={TOKENS.greenSoft}>{logs.length} OK</Chip>
+      </div>
+      <div style={{ padding: '4px 12px 10px', fontSize: 10.5, fontFamily: TOKENS.fontMono,
+        color: TOKENS.textDim, lineHeight: 1.7, maxHeight: 168, overflow: 'auto' }}>
+        {logs.map((e, i) => (
+          <div key={i} style={{ display: 'flex', gap: 8 }}>
+            <span style={{ color: e.ok ? TOKENS.green : TOKENS.red, width: 10 }}>{e.ok ? '✓' : '✗'}</span>
+            <span style={{ color: TOKENS.textFaint, width: 54 }}>{e.t}</span>
+            <span style={{ color: TOKENS.text, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.cmd}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── top bar + secondary toolbar ────────────────────────────────────────
+
+function TopBar({ onPaletteOpen, onLangToggle }) {
+  const { lang, L, applyCount, onApply } = useRail();
+  return (
+    <div style={{ height: 38, borderBottom: `1px solid ${TOKENS.line}`,
+      background: TOKENS.bg2, display: 'flex', alignItems: 'center', padding: '0 12px', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+        <div style={{ width: 20, height: 20, borderRadius: 5,
+          background: `linear-gradient(135deg, ${TOKENS.indigo}, ${TOKENS.magenta})` }} />
+        <span style={{ fontSize: 13, fontWeight: 600 }}>netns-viz</span>
+      </div>
+      <span style={{ color: TOKENS.textFaint, fontSize: 11 }}>▸</span>
+      <span style={{ color: TOKENS.textMid, fontSize: 12 }}>{lang === 'jp' ? 'ワークスペース' : 'Workspace'}</span>
+      <span style={{ color: TOKENS.textFaint, fontSize: 11 }}>▸</span>
+      <span style={{ color: TOKENS.text, fontSize: 12, fontFamily: TOKENS.fontMono }}>ch01-vlan-trunk.json</span>
+
+      <div style={{ flex: 1 }} />
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, height: 22,
+        padding: '0 8px', fontSize: 10.5, fontFamily: TOKENS.fontMono,
+        background: TOKENS.greenSoft, color: TOKENS.green, borderRadius: 4 }}>
+        <Dot color={TOKENS.green} size={5} />
+        {L.dockerOn}
+      </div>
+
+      <button onClick={onLangToggle} title="Toggle language"
+        style={{ height: 24, padding: '0 8px', fontSize: 10.5, color: TOKENS.textMid,
+          background: 'transparent', border: `1px solid ${TOKENS.line}`, borderRadius: 4,
+          cursor: 'pointer', fontFamily: TOKENS.fontMono, letterSpacing: '0.1em' }}>
+        {lang === 'jp' ? 'JP' : 'EN'}
+      </button>
+
+      <button style={{ height: 24, padding: '0 8px', fontSize: 11, color: TOKENS.textMid,
+        background: 'transparent', border: `1px solid ${TOKENS.line}`, borderRadius: 4, cursor: 'pointer',
+        display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+        <IconStroke d={ICONS.terminal} size={11} /> {L.terminal}
+      </button>
+
+      <button onClick={onApply} style={{ height: 24, padding: '0 10px', fontSize: 11, color: '#fff', fontWeight: 500,
+        background: TOKENS.indigo, border: 'none', borderRadius: 4, cursor: 'pointer',
+        display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+        <IconStroke d={ICONS.bolt} size={11} color="#fff" /> {L.apply}
+        {applyCount > 0 && <span style={{ fontFamily: TOKENS.fontMono, fontSize: 10, opacity: 0.8, marginLeft: 2 }}>· {applyCount}</span>}
+      </button>
+    </div>
+  );
+}
+
+function SecondaryToolbar({ onPaletteOpen }) {
+  const { L, view, setView } = useRail();
+  const TABS = [
+    { k: 'canvas', label: L.canvas, icon: ICONS.grid },
+    { k: 'list', label: L.list, icon: ICONS.list },
+    { k: 'table', label: L.table, icon: ICONS.table },
+  ];
+  return (
+    <div style={{ height: 38, borderBottom: `1px solid ${TOKENS.line}`,
+      background: TOKENS.bg, display: 'flex', alignItems: 'center', padding: '0 12px', gap: 6 }}>
+      <div style={{ display: 'inline-flex', alignItems: 'center',
+        background: TOKENS.surface, border: `1px solid ${TOKENS.line}`, borderRadius: 5, padding: 2 }}>
+        {TABS.map(v => {
+          const active = view === v.k;
+          return (
+            <button key={v.k} onClick={() => setView(v.k)}
+              style={{ height: 22, padding: '0 10px', fontSize: 11,
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                background: active ? TOKENS.surfaceHi : 'transparent',
+                color: active ? TOKENS.text : TOKENS.textDim,
+                border: 'none', cursor: 'pointer', borderRadius: 4,
+                fontWeight: active ? 500 : 400 }}>
+              <IconStroke d={v.icon} size={11} color={active ? TOKENS.text : TOKENS.textDim} /> {v.label}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ width: 1, height: 16, background: TOKENS.line, margin: '0 4px' }} />
+      {[
+        [ICONS.plus, L.addNs], [ICONS.bridge, L.addBridge],
+        [ICONS.link, L.addVeth], [ICONS.vlan, L.addVlan],
+      ].map(([ic, lb]) => (
+        <button key={lb} style={{
+          display: 'inline-flex', alignItems: 'center', gap: 5,
+          height: 24, padding: '0 8px', fontSize: 11,
+          color: TOKENS.textMid, background: 'transparent',
+          border: '1px solid transparent', borderRadius: 4, cursor: 'pointer',
+        }} onMouseEnter={e => e.currentTarget.style.background = TOKENS.surface}
+           onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+          <IconStroke d={ic} size={11} /> {lb}
+        </button>
+      ))}
+
+      <div style={{ flex: 1 }} />
+
+      <button onClick={onPaletteOpen}
+        style={{ display: 'flex', alignItems: 'center', gap: 6,
+          height: 24, padding: '0 8px', background: TOKENS.surface,
+          border: `1px solid ${TOKENS.line}`, borderRadius: 4, width: 260,
+          color: TOKENS.textDim, fontSize: 11, cursor: 'pointer' }}>
+        <IconStroke d={ICONS.search} size={11} />
+        <span style={{ flex: 1, textAlign: 'left' }}>{L.searchShort}</span>
+        <span style={{ fontFamily: TOKENS.fontMono, fontSize: 10, color: TOKENS.textFaint,
+          border: `1px solid ${TOKENS.line}`, padding: '1px 4px', borderRadius: 3 }}>⌘K</span>
+      </button>
+      <button style={{ height: 24, padding: '0 6px', color: TOKENS.textDim,
+        background: 'transparent', border: 'none', cursor: 'pointer' }}>
+        <IconStroke d={ICONS.settings} size={13} />
+      </button>
+    </div>
+  );
+}
+
+Object.assign(window, { RailCtx, useRail, useHover, Chip, Dot, buildPortMap, LeftRail, TopBar, SecondaryToolbar, CommandLog });
+
+// B · Rail — canvas / list / table views + inspector + palette
+
+// ─── interactive topology canvas ────────────────────────────────────────
+
+function InteractiveTopology() {
+  const { selectedId, setSelected, hoverId, setHover, lang } = useRail();
+  const [pan, setPan] = React.useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = React.useState(1);
+  const [contextMenu, setCtx] = React.useState(null); // {x, y, id}
+  const [pingAnim, setPingAnim] = React.useState(null); // linkId being animated
+  const dragRef = React.useRef(null);
+
+  const nsById = {};
+  CH01.namespaces.forEach(n => nsById[n.id] = n);
+
+  const onBgMouseDown = (e) => {
+    if (e.target.closest('[data-node]')) return;
+    setCtx(null); setSelected(null);
+    dragRef.current = { sx: e.clientX, sy: e.clientY, px: pan.x, py: pan.y };
+  };
+  const onMouseMove = (e) => {
+    if (!dragRef.current) return;
+    setPan({ x: dragRef.current.px + (e.clientX - dragRef.current.sx),
+             y: dragRef.current.py + (e.clientY - dragRef.current.sy) });
+  };
+  const onMouseUp = () => { dragRef.current = null; };
+  const onWheel = (e) => {
+    e.preventDefault();
+    if (e.ctrlKey || e.metaKey) {
+      setZoom(z => Math.max(0.5, Math.min(2, z * (1 - e.deltaY * 0.002))));
+    } else {
+      setPan(p => ({ x: p.x - e.deltaX, y: p.y - e.deltaY }));
+    }
+  };
+
+  // compute link endpoints
+  const links = CH01.links.map(l => {
+    const a = PortAnchor(nsById[l.a.ns], l.a.side);
+    const b = PortAnchor(nsById[l.b.ns], l.b.side);
+    return { ...l, pa: a, pb: b };
+  });
+
+  const isLinkHot = (l) => {
+    if (!selectedId && !hoverId) return false;
+    const id = selectedId || hoverId;
+    return l.a.ns === id || l.b.ns === id;
+  };
+  const isNodeDim = (n) => selectedId && selectedId !== n.id && !links.some(l => (l.a.ns === selectedId && l.b.ns === n.id) || (l.b.ns === selectedId && l.a.ns === n.id));
+
+  // Bounds for canvas
+  const VW = 1240, VH = 720;
+
+  return (
+    <div
+      onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}
+      onMouseLeave={onMouseUp}
+      onWheel={onWheel}
+      onMouseDown={onBgMouseDown}
+      style={{ flex: 1, position: 'relative', background: TOKENS.bg, overflow: 'hidden', cursor: dragRef.current ? 'grabbing' : 'default' }}
+    >
+      <svg width="100%" height="100%" viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="xMidYMid meet"
+        style={{ position: 'absolute', inset: 0, userSelect: 'none' }}>
+        <defs>
+          <pattern id="dot-grid" width="28" height="28" patternUnits="userSpaceOnUse">
+            <circle cx={1} cy={1} r={0.7} fill={TOKENS.textFaint} opacity={0.55} />
+          </pattern>
+          <radialGradient id="canvas-spot" cx="50%" cy="30%" r="60%">
+            <stop offset="0%" stopColor={TOKENS.indigo} stopOpacity={0.08} />
+            <stop offset="100%" stopColor={TOKENS.indigo} stopOpacity={0} />
+          </radialGradient>
+          <filter id="node-shadow"><feDropShadow dx="0" dy="4" stdDeviation="8" floodColor="#000" floodOpacity="0.5" /></filter>
+        </defs>
+
+        <rect width={VW} height={VH} fill={TOKENS.bg} />
+        <rect width={VW} height={VH} fill="url(#dot-grid)" />
+        <rect width={VW} height={VH} fill="url(#canvas-spot)" />
+
+        <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
+          {/* VLAN territories */}
+          <g opacity={0.55}>
+            <ellipse cx={280} cy={480} rx={270} ry={135} fill={TOKENS.vlan10Soft} />
+            <text x={280} y={635} textAnchor="middle" fill={TOKENS.vlan10} fontSize={10}
+              fontFamily={TOKENS.fontMono} letterSpacing="0.2em" opacity={0.7}>VLAN 10 · 192.168.10.0/24</text>
+            <ellipse cx={960} cy={480} rx={270} ry={135} fill={TOKENS.vlan20Soft} />
+            <text x={960} y={635} textAnchor="middle" fill={TOKENS.vlan20} fontSize={10}
+              fontFamily={TOKENS.fontMono} letterSpacing="0.2em" opacity={0.7}>VLAN 20 · 192.168.20.0/24</text>
+          </g>
+
+          {/* Links */}
+          {links.map(l => {
+            const hot = isLinkHot(l);
+            const color = l.kind === 'trunk' ? TOKENS.trunk : vlanColor(l.vlan);
+            const animating = pingAnim === l.id;
+            return (
+              <g key={l.id} opacity={selectedId && !hot ? 0.3 : 1} style={{ transition: 'opacity .15s' }}>
+                <LinkPath a={l.pa} b={l.pb} stroke={color} dashed={l.kind === 'trunk'} highlighted={hot} />
+                <circle cx={l.pa.x} cy={l.pa.y} r={3} fill={color} />
+                <circle cx={l.pb.x} cy={l.pb.y} r={3} fill={color} />
+                {animating && (
+                  <circle r={4} fill={color}>
+                    <animateMotion dur="1.2s" repeatCount="2"
+                      path={`M${l.pa.x - l.pa.x},${l.pa.y - l.pa.y} L${l.pb.x - l.pa.x},${l.pb.y - l.pa.y}`} />
+                  </circle>
+                )}
+                {l.kind === 'trunk' && (() => {
+                  const mx = (l.pa.x + l.pb.x) / 2, my = (l.pa.y + l.pb.y) / 2;
+                  return (
+                    <g transform={`translate(${mx},${my})`}>
+                      <rect x={-36} y={-10} width={72} height={20} rx={4}
+                        fill={TOKENS.bg} stroke={TOKENS.trunk} strokeWidth={0.75} strokeOpacity={hot ? 1 : 0.5} />
+                      <text x={0} y={4} textAnchor="middle" fill={TOKENS.trunk}
+                        fontSize={9.5} fontWeight={600} fontFamily={TOKENS.fontMono}
+                        letterSpacing="0.1em">TRUNK 10,20</text>
+                    </g>
+                  );
+                })()}
+              </g>
+            );
+          })}
+
+          {/* Nodes */}
+          {CH01.namespaces.map(n => {
+            const sel = selectedId === n.id;
+            const hov = hoverId === n.id;
+            const dim = isNodeDim(n);
+            return (
+              <g key={n.id} data-node={n.id}
+                onMouseEnter={() => setHover(n.id)}
+                onMouseLeave={() => setHover(null)}
+                onClick={(e) => { e.stopPropagation(); setSelected(n.id); setCtx(null); }}
+                onContextMenu={(e) => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY, id: n.id }); setSelected(n.id); }}
+                style={{ cursor: 'pointer', opacity: dim ? 0.35 : 1, transition: 'opacity .15s' }}>
+                <NodeCard n={n} selected={sel || hov} variant="rail" L={LABELS[lang]} />
+              </g>
+            );
+          })}
+        </g>
+      </svg>
+
+      {/* Breadcrumb pill */}
+      {selectedId && nsById[selectedId] && (
+        <div style={{ position: 'absolute', top: 14, left: '50%', transform: 'translateX(-50%)',
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '6px 12px', background: TOKENS.surface,
+          border: `1px solid ${TOKENS.line}`, borderRadius: 999,
+          fontSize: 11, fontFamily: TOKENS.fontMono, color: TOKENS.textMid,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
+          <IconStroke d={nsById[selectedId].role === 'switch' ? ICONS.switch : ICONS.host}
+            size={11} color={nsById[selectedId].role === 'switch' ? TOKENS.magenta : vlanColor(nsById[selectedId].vlan)} />
+          <span style={{ color: TOKENS.text, fontWeight: 500 }}>{selectedId}</span>
+          <span style={{ color: TOKENS.textFaint }}>/</span>
+          <span>{nsById[selectedId].role === 'switch' ? 'br0' : `veth-${selectedId}`}</span>
+        </div>
+      )}
+
+      {/* Bottom chrome */}
+      <div style={{ position: 'absolute', bottom: 14, left: 14, right: 14,
+        display: 'flex', alignItems: 'center', gap: 10, pointerEvents: 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10,
+          padding: '6px 10px', background: TOKENS.surface,
+          border: `1px solid ${TOKENS.line}`, borderRadius: 6,
+          fontSize: 11, fontFamily: TOKENS.fontMono, color: TOKENS.textDim,
+          pointerEvents: 'auto' }}>
+          <span><span style={{ color: TOKENS.text }}>6</span> ns</span>
+          <span style={{ color: TOKENS.textFaint }}>·</span>
+          <span><span style={{ color: TOKENS.text }}>5</span> veth</span>
+          <span style={{ color: TOKENS.textFaint }}>·</span>
+          <span><span style={{ color: TOKENS.text }}>2</span> bridge</span>
+          <span style={{ color: TOKENS.textFaint }}>·</span>
+          <span><span style={{ color: TOKENS.text }}>8</span> vlan ports</span>
+        </div>
+        <div style={{ flex: 1 }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4,
+          padding: 4, background: TOKENS.surface,
+          border: `1px solid ${TOKENS.line}`, borderRadius: 6, pointerEvents: 'auto' }}>
+          <button onClick={() => setZoom(z => Math.max(0.5, z * 0.9))}
+            style={{ height: 22, padding: '0 8px', border: 'none', background: 'transparent',
+              color: TOKENS.textMid, fontSize: 13, cursor: 'pointer' }}>−</button>
+          <span onClick={() => { setZoom(1); setPan({x:0,y:0}); }}
+            style={{ fontSize: 11, fontFamily: TOKENS.fontMono,
+              color: TOKENS.textMid, width: 44, textAlign: 'center', cursor: 'pointer' }}>
+            {Math.round(zoom * 100)}%
+          </span>
+          <button onClick={() => setZoom(z => Math.min(2, z * 1.1))}
+            style={{ height: 22, padding: '0 8px', border: 'none', background: 'transparent',
+              color: TOKENS.textMid, fontSize: 13, cursor: 'pointer' }}>+</button>
+        </div>
+      </div>
+
+      {/* Context menu */}
+      {contextMenu && (
+        <ContextMenu x={contextMenu.x} y={contextMenu.y} id={contextMenu.id}
+          onClose={() => setCtx(null)}
+          onPing={() => {
+            // find a link involving this node
+            const l = CH01.links.find(x => x.a.ns === contextMenu.id || x.b.ns === contextMenu.id);
+            if (l) { setPingAnim(l.id); setTimeout(() => setPingAnim(null), 2500); }
+            setCtx(null);
+          }} />
+      )}
+    </div>
+  );
+}
+
+function ContextMenu({ x, y, id, onClose, onPing }) {
+  const { lang } = useRail();
+  const items = [
+    { icon: ICONS.eye, label: lang === 'jp' ? 'インスペクタで開く' : 'Open in inspector' },
+    { icon: ICONS.terminal, label: lang === 'jp' ? 'シェルを起動' : 'Open shell', mono: `nsenter -t ${id}` },
+    { icon: ICONS.bolt, label: lang === 'jp' ? 'ping を送信' : 'Send ping', onClick: onPing },
+    { icon: ICONS.link, label: lang === 'jp' ? 'リンクを追加…' : 'Attach link…' },
+    { icon: ICONS.vlan, label: lang === 'jp' ? 'VLAN を設定…' : 'Set VLAN…' },
+    'sep',
+    { icon: ICONS.close, label: lang === 'jp' ? '削除' : 'Delete', danger: true },
+  ];
+  React.useEffect(() => {
+    const h = () => onClose();
+    window.addEventListener('click', h);
+    return () => window.removeEventListener('click', h);
+  }, []);
+  return (
+    <div style={{ position: 'fixed', left: x, top: y, zIndex: 100,
+      background: TOKENS.surface, border: `1px solid ${TOKENS.line}`, borderRadius: 8,
+      padding: 4, minWidth: 220, boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
+      fontFamily: TOKENS.fontSans }}>
+      {items.map((it, i) => it === 'sep' ? (
+        <div key={i} style={{ height: 1, background: TOKENS.line, margin: '4px 0' }} />
+      ) : (
+        <div key={i} onClick={(e) => { e.stopPropagation(); it.onClick && it.onClick(); onClose(); }}
+          style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px',
+            borderRadius: 4, cursor: 'pointer', fontSize: 12,
+            color: it.danger ? TOKENS.red : TOKENS.text }}
+          onMouseEnter={(e) => e.currentTarget.style.background = it.danger ? TOKENS.redSoft : TOKENS.surfaceHi}
+          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+          <IconStroke d={it.icon} size={12} color={it.danger ? TOKENS.red : TOKENS.textMid} />
+          <span style={{ flex: 1 }}>{it.label}</span>
+          {it.mono && <span style={{ fontSize: 10, fontFamily: TOKENS.fontMono, color: TOKENS.textFaint }}>{it.mono}</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── List view ──────────────────────────────────────────────────────────
+
+function ListView() {
+  const { selectedId, setSelected, lang, L } = useRail();
+  const rows = [
+    ...CH01.namespaces.map(n => ({ ...n, kind: 'ns' })),
+  ];
+  return (
+    <div style={{ flex: 1, overflow: 'auto', padding: '14px 18px', background: TOKENS.bg }}>
+      <div style={{ fontSize: 12, color: TOKENS.textDim, fontFamily: TOKENS.fontMono,
+        letterSpacing: '0.15em', marginBottom: 10 }}>
+        {(lang === 'jp' ? 'ノード · ' : 'NODES · ')}{rows.length}
+      </div>
+      <div style={{ border: `1px solid ${TOKENS.line}`, borderRadius: 6, overflow: 'hidden',
+        background: TOKENS.bg2 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '24px 120px 80px 80px 1fr 100px 80px',
+          padding: '8px 14px', fontSize: 9.5, color: TOKENS.textDim,
+          fontFamily: TOKENS.fontMono, letterSpacing: '0.12em', fontWeight: 500,
+          background: TOKENS.surface, borderBottom: `1px solid ${TOKENS.line}` }}>
+          <span></span>
+          <span>NAME</span><span>ROLE</span><span>VLAN</span><span>IP / BRIDGE</span><span>PORTS</span><span>STATE</span>
+        </div>
+        {rows.map(n => {
+          const sel = selectedId === n.id;
+          return (
+            <div key={n.id} onClick={() => setSelected(n.id)}
+              style={{ display: 'grid', gridTemplateColumns: '24px 120px 80px 80px 1fr 100px 80px',
+                alignItems: 'center', padding: '10px 14px', fontSize: 12, fontFamily: TOKENS.fontMono,
+                borderBottom: `1px solid ${TOKENS.lineSoft}`, cursor: 'pointer',
+                background: sel ? TOKENS.surface2 : 'transparent',
+                borderLeft: sel ? `2px solid ${TOKENS.indigo}` : '2px solid transparent' }}
+              onMouseEnter={e => { if (!sel) e.currentTarget.style.background = TOKENS.lineSoft; }}
+              onMouseLeave={e => { if (!sel) e.currentTarget.style.background = 'transparent'; }}>
+              <IconStroke d={n.role === 'switch' ? ICONS.switch : ICONS.host} size={13}
+                color={n.role === 'switch' ? TOKENS.magenta : vlanColor(n.vlan)} />
+              <span style={{ color: TOKENS.text, fontWeight: sel ? 600 : 500 }}>{n.name}</span>
+              <span style={{ color: TOKENS.textMid, fontSize: 11 }}>{n.role === 'switch' ? 'L2 switch' : 'host'}</span>
+              <span>
+                {n.role === 'switch'
+                  ? <Chip color={TOKENS.magenta} soft={TOKENS.magentaSoft}>10, 20</Chip>
+                  : <Chip color={vlanColor(n.vlan)} soft={n.vlan===10?TOKENS.vlan10Soft:TOKENS.vlan20Soft}>VLAN {n.vlan}</Chip>}
+              </span>
+              <span style={{ color: TOKENS.textMid }}>{n.ip || 'br0 · vlan_filtering 1'}</span>
+              <span style={{ color: TOKENS.textDim }}>{n.role === 'switch' ? '3' : '1'}</span>
+              <span><Chip color={TOKENS.green} soft={TOKENS.greenSoft}>UP</Chip></span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Table view (VLAN port matrix — the killer feature of B) ─────────────
+
+function TableView() {
+  const { lang, L, portEdits, setPortEdits } = useRail();
+  const portMap = buildPortMap();
+  const [editing, setEditing] = React.useState(null); // {ns, port, vid, field}
+
+  const Row = ({ nsId, entry }) => {
+    const key = `${nsId}::${entry.port}::${entry.vid}`;
+    const edited = portEdits[key];
+    const curVid = edited?.vid ?? entry.vid;
+    const curFlags = edited?.flags ?? entry.flags;
+    const isEditing = editing?.key === key;
+
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: '60px 160px 80px 100px 1fr 60px',
+        alignItems: 'center', padding: '10px 14px', fontSize: 11.5, fontFamily: TOKENS.fontMono,
+        borderBottom: `1px solid ${TOKENS.lineSoft}`,
+        background: edited ? TOKENS.indigoSoft : 'transparent' }}
+        onMouseEnter={e => { if (!edited) e.currentTarget.style.background = TOKENS.lineSoft; }}
+        onMouseLeave={e => { if (!edited) e.currentTarget.style.background = 'transparent'; }}>
+        <span style={{ color: TOKENS.magenta, fontWeight: 600 }}>{nsId}</span>
+        <span style={{ color: TOKENS.text }}>{entry.port}</span>
+        <span>
+          {isEditing && editing.field === 'vid' ? (
+            <input autoFocus type="number" defaultValue={curVid}
+              onBlur={(e) => { setPortEdits({...portEdits, [key]: { ...edited, vid: parseInt(e.target.value) || curVid }}); setEditing(null); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') setEditing(null); }}
+              style={{ width: 50, background: TOKENS.bg, border: `1px solid ${TOKENS.indigo}`,
+                color: TOKENS.text, fontFamily: TOKENS.fontMono, fontSize: 11.5, padding: '2px 6px', borderRadius: 3 }} />
+          ) : (
+            <span onDoubleClick={() => setEditing({ key, field: 'vid' })}
+              style={{ cursor: 'text' }}>
+              <Chip color={vlanColor(curVid)} soft={curVid === 10 ? TOKENS.vlan10Soft : TOKENS.vlan20Soft}>{curVid}</Chip>
+            </span>
+          )}
+        </span>
+        <span style={{ color: TOKENS.textMid, fontSize: 10.5 }}>{entry.kind}</span>
+        <span style={{ color: TOKENS.textDim, fontSize: 10.5 }}>{curFlags}</span>
+        <span>
+          {edited && <Chip color={TOKENS.indigo} soft={TOKENS.indigoSoft}>DIRTY</Chip>}
+        </span>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ flex: 1, overflow: 'auto', padding: '14px 18px', background: TOKENS.bg }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+        <div style={{ fontSize: 12, color: TOKENS.textDim, fontFamily: TOKENS.fontMono,
+          letterSpacing: '0.15em' }}>
+          {lang === 'jp' ? 'VLAN ポートマトリクス · ' : 'VLAN PORT MATRIX · '}8
+        </div>
+        <span style={{ fontSize: 10.5, color: TOKENS.textFaint, fontStyle: 'italic' }}>
+          {lang === 'jp' ? '(VID セルをダブルクリックで編集)' : '(double-click a VID to edit)'}
+        </span>
+        <div style={{ flex: 1 }} />
+        {Object.keys(portEdits).length > 0 && (
+          <>
+            <span style={{ fontSize: 11, color: TOKENS.indigo, fontFamily: TOKENS.fontMono }}>
+              {Object.keys(portEdits).length} {lang === 'jp' ? '件の変更' : 'pending'}
+            </span>
+            <button onClick={() => setPortEdits({})}
+              style={{ height: 22, padding: '0 8px', fontSize: 10.5, color: TOKENS.textMid,
+                background: TOKENS.surface, border: `1px solid ${TOKENS.line}`, borderRadius: 4, cursor: 'pointer' }}>
+              {lang === 'jp' ? 'リセット' : 'Reset'}
+            </button>
+          </>
+        )}
+      </div>
+      <div style={{ border: `1px solid ${TOKENS.line}`, borderRadius: 6, overflow: 'hidden',
+        background: TOKENS.bg2 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '60px 160px 80px 100px 1fr 60px',
+          padding: '8px 14px', fontSize: 9.5, color: TOKENS.textDim,
+          fontFamily: TOKENS.fontMono, letterSpacing: '0.12em', fontWeight: 500,
+          background: TOKENS.surface, borderBottom: `1px solid ${TOKENS.line}` }}>
+          <span>SWITCH</span><span>PORT</span><span>VID</span><span>KIND</span><span>FLAGS</span><span></span>
+        </div>
+        {['sw1', 'sw2'].map(nsId => (
+          <React.Fragment key={nsId}>
+            {portMap[nsId].map((entry, i) => (
+              <Row key={`${nsId}-${i}`} nsId={nsId} entry={entry} />
+            ))}
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { InteractiveTopology, ContextMenu, ListView, TableView });
+
+// B · Rail — inspector (dynamic) + command palette
+
+function Inspector() {
+  const { selectedId, setSelected, lang, L } = useRail();
+  const nsById = {};
+  CH01.namespaces.forEach(n => nsById[n.id] = n);
+  const node = selectedId ? nsById[selectedId] : null;
+
+  return (
+    <div style={{ width: 300, borderLeft: `1px solid ${TOKENS.line}`, background: TOKENS.bg2,
+      display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ padding: '10px 14px', borderBottom: `1px solid ${TOKENS.line}`,
+        display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 9.5, color: TOKENS.textDim, fontFamily: TOKENS.fontMono,
+          letterSpacing: '0.18em', fontWeight: 500 }}>{L.inspector.toUpperCase()}</span>
+        <div style={{ flex: 1 }} />
+        {node && (
+          <button onClick={() => setSelected(null)}
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 2 }}>
+            <IconStroke d={ICONS.close} size={12} color={TOKENS.textDim} />
+          </button>
+        )}
+      </div>
+
+      {!node ? <InspectorEmpty /> : node.role === 'switch' ? <InspectorSwitch node={node} /> : <InspectorHost node={node} />}
+    </div>
+  );
+}
+
+function InspectorEmpty() {
+  const { lang } = useRail();
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
+      justifyContent: 'center', padding: 24, textAlign: 'center', color: TOKENS.textDim }}>
+      <div style={{ width: 44, height: 44, borderRadius: 10, background: TOKENS.surface,
+        border: `1px solid ${TOKENS.line}`, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+        <IconStroke d={ICONS.eye} size={18} color={TOKENS.textDim} />
+      </div>
+      <div style={{ fontSize: 12, color: TOKENS.textMid, marginBottom: 4 }}>
+        {lang === 'jp' ? 'ノードを選択' : 'Select a node'}
+      </div>
+      <div style={{ fontSize: 11, color: TOKENS.textFaint, lineHeight: 1.5, maxWidth: 220 }}>
+        {lang === 'jp' ? 'キャンバスでクリックするか、左のツリーから選んでください。' : 'Click a node on the canvas or pick one from the tree on the left.'}
+      </div>
+    </div>
+  );
+}
+
+function InspectorSwitch({ node }) {
+  const { lang, L } = useRail();
+  const portMap = buildPortMap();
+  const ports = portMap[node.id] || [];
+
+  return (
+    <div style={{ flex: 1, overflow: 'auto' }}>
+      {/* header */}
+      <div style={{ padding: '14px 14px 12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+          <div style={{ width: 28, height: 28, borderRadius: 7,
+            background: TOKENS.magentaSoft, display: 'flex',
+            alignItems: 'center', justifyContent: 'center', color: TOKENS.magenta }}>
+            <IconStroke d={ICONS.switch} size={16} />
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 600, fontFamily: TOKENS.fontMono, letterSpacing: '-0.01em' }}>{node.name}</div>
+          <div style={{ flex: 1 }} />
+          <Chip color={TOKENS.green} soft={TOKENS.greenSoft}>RUNNING</Chip>
+        </div>
+        <div style={{ fontSize: 11, color: TOKENS.textDim, fontFamily: TOKENS.fontMono }}>
+          {lang === 'jp' ? 'L2 スイッチ · 名前空間' : 'L2 switch · namespace'}
+        </div>
+      </div>
+
+      {/* properties */}
+      <Section label="PROPERTIES">
+        <KV k="Name" v={node.name} mono />
+        <KV k="PID" v="31204" mono />
+        <KV k="Created" v="14:22:08" mono />
+      </Section>
+
+      {/* bridge */}
+      <Section label="BRIDGE · br0">
+        <div style={{ background: TOKENS.surface, border: `1px solid ${TOKENS.line}`, borderRadius: 6,
+          padding: 10, fontFamily: TOKENS.fontMono, fontSize: 11, lineHeight: 1.8 }}>
+          <div><span style={{ color: TOKENS.textDim }}>vlan_filtering</span> <span style={{ color: TOKENS.green }}>1</span></div>
+          <div><span style={{ color: TOKENS.textDim }}>stp_state</span> <span style={{ color: TOKENS.text }}>0</span></div>
+          <div><span style={{ color: TOKENS.textDim }}>ageing_time</span> <span style={{ color: TOKENS.text }}>300</span></div>
+        </div>
+      </Section>
+
+      {/* ports */}
+      <Section label={`BRIDGE PORTS · ${ports.length}`}>
+        {Object.entries(ports.reduce((acc, p) => {
+          (acc[p.port] = acc[p.port] || []).push(p); return acc;
+        }, {})).map(([portName, entries]) => (
+          <div key={portName} style={{ background: TOKENS.surface, border: `1px solid ${TOKENS.line}`,
+            borderRadius: 6, padding: '8px 10px', marginBottom: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <Dot color={entries[0].kind === 'trunk' ? TOKENS.trunk : vlanColor(entries[0].vid)} />
+              <span style={{ fontSize: 11.5, fontFamily: TOKENS.fontMono, color: TOKENS.text, fontWeight: 500 }}>{portName}</span>
+              <div style={{ flex: 1 }} />
+              <Chip color={entries[0].kind === 'trunk' ? TOKENS.trunk : TOKENS.textDim}
+                soft={entries[0].kind === 'trunk' ? TOKENS.trunkSoft : TOKENS.lineSoft}>
+                {entries[0].kind}
+              </Chip>
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {entries.map((e, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4,
+                  padding: '2px 6px', fontSize: 10, fontFamily: TOKENS.fontMono,
+                  background: e.vid === 10 ? TOKENS.vlan10Soft : TOKENS.vlan20Soft,
+                  color: vlanColor(e.vid), borderRadius: 3 }}>
+                  <span>vid {e.vid}</span>
+                  <span style={{ color: TOKENS.textFaint }}>·</span>
+                  <span>{e.flags}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </Section>
+
+      <InspectorFooter />
+    </div>
+  );
+}
+
+function InspectorHost({ node }) {
+  const { lang, L } = useRail();
+  return (
+    <div style={{ flex: 1, overflow: 'auto' }}>
+      <div style={{ padding: '14px 14px 12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+          <div style={{ width: 28, height: 28, borderRadius: 7,
+            background: node.vlan === 10 ? TOKENS.vlan10Soft : TOKENS.vlan20Soft,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', color: vlanColor(node.vlan) }}>
+            <IconStroke d={ICONS.host} size={16} />
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 600, fontFamily: TOKENS.fontMono, letterSpacing: '-0.01em' }}>{node.name}</div>
+          <div style={{ flex: 1 }} />
+          <Chip color={TOKENS.green} soft={TOKENS.greenSoft}>UP</Chip>
+        </div>
+        <div style={{ fontSize: 11, color: TOKENS.textDim, fontFamily: TOKENS.fontMono }}>
+          {lang === 'jp' ? 'ホスト · 名前空間' : 'Host · namespace'}
+        </div>
+      </div>
+
+      <Section label="INTERFACE">
+        <div style={{ background: TOKENS.surface, border: `1px solid ${TOKENS.line}`, borderRadius: 6,
+          padding: 10, fontFamily: TOKENS.fontMono, fontSize: 11, lineHeight: 1.8 }}>
+          <div><span style={{ color: TOKENS.textDim }}>name</span> <span style={{ color: TOKENS.text }}>veth-{node.name}</span></div>
+          <div><span style={{ color: TOKENS.textDim }}>mtu</span> <span style={{ color: TOKENS.text }}>1500</span></div>
+          <div><span style={{ color: TOKENS.textDim }}>address</span> <span style={{ color: TOKENS.text }}>{node.ip}</span></div>
+          <div><span style={{ color: TOKENS.textDim }}>state</span> <span style={{ color: TOKENS.green }}>UP</span></div>
+        </div>
+      </Section>
+
+      <Section label="VLAN MEMBERSHIP">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10,
+          background: node.vlan === 10 ? TOKENS.vlan10Soft : TOKENS.vlan20Soft,
+          border: `1px solid ${vlanColor(node.vlan)}40`,
+          padding: '10px 12px', borderRadius: 6 }}>
+          <div style={{ width: 4, height: 30, background: vlanColor(node.vlan), borderRadius: 2 }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontFamily: TOKENS.fontMono, color: vlanColor(node.vlan), fontWeight: 600 }}>VLAN {node.vlan}</div>
+            <div style={{ fontSize: 10.5, color: TOKENS.textMid, fontFamily: TOKENS.fontMono }}>
+              192.168.{node.vlan}.0/24 · {lang === 'jp' ? 'アクセス' : 'access'}
+            </div>
+          </div>
+        </div>
+      </Section>
+
+      <Section label={lang === 'jp' ? '接続先' : 'ATTACHED TO'}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
+          background: TOKENS.surface, border: `1px solid ${TOKENS.line}`, borderRadius: 6 }}>
+          <IconStroke d={ICONS.switch} size={13} color={TOKENS.magenta} />
+          <span style={{ fontSize: 12, fontFamily: TOKENS.fontMono, color: TOKENS.text }}>
+            {node.vlan === 10 ? 'sw1' : 'sw2'}
+          </span>
+          <span style={{ color: TOKENS.textFaint, fontSize: 11 }}>›</span>
+          <span style={{ fontSize: 11, fontFamily: TOKENS.fontMono, color: TOKENS.textMid }}>
+            {node.vlan === 10 ? `veth-sw1-p${node.id === 'pc1' ? 1 : 2}` : `veth-sw2-p${node.id === 'pc3' ? 1 : 2}`}
+          </span>
+        </div>
+      </Section>
+
+      <InspectorFooter />
+    </div>
+  );
+}
+
+function Section({ label, children }) {
+  return (
+    <div style={{ padding: '0 14px 14px' }}>
+      <div style={{ fontSize: 9.5, color: TOKENS.textDim, fontFamily: TOKENS.fontMono,
+        letterSpacing: '0.18em', fontWeight: 500, marginBottom: 8 }}>{label}</div>
+      {children}
+    </div>
+  );
+}
+
+function KV({ k, v, mono }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0',
+      fontSize: 11.5, fontFamily: mono ? TOKENS.fontMono : TOKENS.fontSans,
+      borderBottom: `1px solid ${TOKENS.lineSoft}` }}>
+      <span style={{ color: TOKENS.textDim }}>{k}</span>
+      <span style={{ color: TOKENS.text }}>{v}</span>
+    </div>
+  );
+}
+
+function InspectorFooter() {
+  const { lang } = useRail();
+  return (
+    <div style={{ padding: '10px 14px', borderTop: `1px solid ${TOKENS.line}`,
+      display: 'flex', gap: 6, background: TOKENS.bg2, position: 'sticky', bottom: 0 }}>
+      <button style={{ flex: 1, height: 28, fontSize: 11, color: TOKENS.textMid,
+        background: TOKENS.surface, border: `1px solid ${TOKENS.line}`, borderRadius: 5,
+        cursor: 'pointer', display: 'inline-flex', alignItems: 'center',
+        justifyContent: 'center', gap: 5 }}>
+        <IconStroke d={ICONS.terminal} size={11} /> {lang === 'jp' ? 'シェル' : 'Shell'}
+      </button>
+      <button style={{ flex: 1, height: 28, fontSize: 11, color: TOKENS.textMid,
+        background: TOKENS.surface, border: `1px solid ${TOKENS.line}`, borderRadius: 5,
+        cursor: 'pointer', display: 'inline-flex', alignItems: 'center',
+        justifyContent: 'center', gap: 5 }}>
+        <IconStroke d={ICONS.eye} size={11} /> {lang === 'jp' ? 'ログ' : 'Logs'}
+      </button>
+    </div>
+  );
+}
+
+// ─── Command palette (⌘K) ───────────────────────────────────────────────
+
+function CommandPalette({ open, onClose }) {
+  const { lang, setSelected, setView } = useRail();
+  const [q, setQ] = React.useState('');
+  const [activeIdx, setActiveIdx] = React.useState(0);
+  const inputRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (open) { setQ(''); setActiveIdx(0); setTimeout(() => inputRef.current?.focus(), 40); }
+  }, [open]);
+
+  const allCommands = [
+    { section: lang === 'jp' ? 'ノードへ移動' : 'Jump to node', items: CH01.namespaces.map(n => ({
+      icon: n.role === 'switch' ? ICONS.switch : ICONS.host,
+      label: n.name,
+      hint: n.role === 'switch' ? 'L2 switch' : n.ip,
+      color: n.role === 'switch' ? TOKENS.magenta : vlanColor(n.vlan),
+      run: () => { setSelected(n.id); setView('canvas'); },
+    })) },
+    { section: lang === 'jp' ? 'ビュー切替' : 'Switch view', items: [
+      { icon: ICONS.grid, label: lang === 'jp' ? 'キャンバス表示' : 'Canvas view', hint: '⌘1', run: () => setView('canvas') },
+      { icon: ICONS.list, label: lang === 'jp' ? 'リスト表示' : 'List view', hint: '⌘2', run: () => setView('list') },
+      { icon: ICONS.table, label: lang === 'jp' ? 'テーブル表示' : 'Table view', hint: '⌘3', run: () => setView('table') },
+    ]},
+    { section: lang === 'jp' ? 'アクション' : 'Actions', items: [
+      { icon: ICONS.plus, label: lang === 'jp' ? '名前空間を追加…' : 'Add namespace…', hint: '⌘N' },
+      { icon: ICONS.bridge, label: lang === 'jp' ? 'ブリッジを追加…' : 'Add bridge…' },
+      { icon: ICONS.link, label: lang === 'jp' ? 'veth ペアを作成…' : 'Create veth pair…' },
+      { icon: ICONS.vlan, label: lang === 'jp' ? 'VLAN を設定…' : 'Configure VLAN…' },
+      { icon: ICONS.bolt, label: lang === 'jp' ? 'ping を実行' : 'Run ping' },
+      { icon: ICONS.terminal, label: lang === 'jp' ? 'ターミナルを開く' : 'Open terminal', hint: '⌃`' },
+    ]},
+  ];
+
+  const flat = allCommands.flatMap(s => s.items.map(i => ({ ...i, section: s.section })))
+    .filter(i => !q || (i.label + ' ' + (i.hint||'')).toLowerCase().includes(q.toLowerCase()));
+
+  React.useEffect(() => {
+    if (!open) return;
+    const h = (e) => {
+      if (e.key === 'Escape') onClose();
+      else if (e.key === 'ArrowDown') { setActiveIdx(i => Math.min(flat.length - 1, i + 1)); e.preventDefault(); }
+      else if (e.key === 'ArrowUp') { setActiveIdx(i => Math.max(0, i - 1)); e.preventDefault(); }
+      else if (e.key === 'Enter') { flat[activeIdx]?.run?.(); onClose(); }
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [open, activeIdx, flat.length]);
+
+  if (!open) return null;
+
+  let lastSection = null;
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+      zIndex: 200, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: '14vh',
+      backdropFilter: 'blur(4px)' }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 560,
+        background: TOKENS.surface, border: `1px solid ${TOKENS.line}`, borderRadius: 10,
+        overflow: 'hidden', boxShadow: '0 25px 70px rgba(0,0,0,0.6)' }}>
+        <div style={{ padding: '14px 16px', borderBottom: `1px solid ${TOKENS.line}`,
+          display: 'flex', alignItems: 'center', gap: 10 }}>
+          <IconStroke d={ICONS.search} size={14} color={TOKENS.textDim} />
+          <input ref={inputRef} value={q} onChange={e => { setQ(e.target.value); setActiveIdx(0); }}
+            placeholder={lang === 'jp' ? 'コマンドを実行… ノード名、VLAN、IP で検索' : 'Run a command… search nodes, VLANs, IPs'}
+            style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none',
+              color: TOKENS.text, fontSize: 14, fontFamily: TOKENS.fontSans }} />
+          <span style={{ fontFamily: TOKENS.fontMono, fontSize: 10, color: TOKENS.textFaint,
+            border: `1px solid ${TOKENS.line}`, padding: '1px 5px', borderRadius: 3 }}>ESC</span>
+        </div>
+        <div style={{ maxHeight: 440, overflow: 'auto', padding: 6 }}>
+          {flat.length === 0 && (
+            <div style={{ padding: 30, textAlign: 'center', color: TOKENS.textFaint, fontSize: 12 }}>
+              {lang === 'jp' ? '一致するコマンドがありません' : 'No matching commands'}
+            </div>
+          )}
+          {flat.map((it, i) => {
+            const showSection = it.section !== lastSection;
+            lastSection = it.section;
+            return (
+              <React.Fragment key={i}>
+                {showSection && (
+                  <div style={{ padding: '10px 12px 4px', fontSize: 9.5, color: TOKENS.textDim,
+                    fontFamily: TOKENS.fontMono, letterSpacing: '0.15em', fontWeight: 500 }}>
+                    {it.section.toUpperCase()}
+                  </div>
+                )}
+                <div onMouseEnter={() => setActiveIdx(i)}
+                  onClick={() => { it.run?.(); onClose(); }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '8px 12px', borderRadius: 6, cursor: 'pointer',
+                    background: activeIdx === i ? TOKENS.surfaceHi : 'transparent' }}>
+                  <IconStroke d={it.icon} size={13} color={it.color || TOKENS.textMid} />
+                  <span style={{ flex: 1, fontSize: 13, color: TOKENS.text }}>{it.label}</span>
+                  {it.hint && <span style={{ fontSize: 10.5, fontFamily: TOKENS.fontMono, color: TOKENS.textFaint }}>{it.hint}</span>}
+                </div>
+              </React.Fragment>
+            );
+          })}
+        </div>
+        <div style={{ padding: '8px 12px', borderTop: `1px solid ${TOKENS.line}`,
+          display: 'flex', alignItems: 'center', gap: 14, fontSize: 10.5, fontFamily: TOKENS.fontMono, color: TOKENS.textFaint }}>
+          <span>↑↓ {lang === 'jp' ? '選択' : 'navigate'}</span>
+          <span>↵ {lang === 'jp' ? '実行' : 'run'}</span>
+          <div style={{ flex: 1 }} />
+          <span>{flat.length} {lang === 'jp' ? '件' : 'results'}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { Inspector, CommandPalette, Section, KV });
+
+// B · Rail — main app shell + tweaks + edit mode protocol
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "accent": "indigo",
+  "showLog": true,
+  "density": "cozy",
+  "startView": "canvas"
+}/*EDITMODE-END*/;
+
+const ACCENTS = {
+  indigo:  { primary: '#7b7ee8', soft: 'rgba(123,126,232,0.12)' },
+  emerald: { primary: '#5ec08a', soft: 'rgba(94,192,138,0.14)' },
+  amber:   { primary: '#e8b15e', soft: 'rgba(232,177,94,0.14)' },
+  rose:    { primary: '#f15f8b', soft: 'rgba(241,95,139,0.14)' },
+  sky:     { primary: '#5ea3e8', soft: 'rgba(94,163,232,0.14)' },
+};
+
+function RailApp() {
+  const [tweaks, setTweaks] = React.useState(TWEAK_DEFAULTS);
+  const [lang, setLang] = React.useState('en');
+  const [selectedId, setSelected] = React.useState('sw1');
+  const [hoverId, setHover] = React.useState(null);
+  const [view, setView] = React.useState(tweaks.startView || 'canvas');
+  const [showLog, setShowLog] = React.useState(tweaks.showLog !== false);
+  const [paletteOpen, setPaletteOpen] = React.useState(false);
+  const [portEdits, setPortEdits] = React.useState({});
+  const [applyCount, setApplyCount] = React.useState(0);
+  const [tweaksOpen, setTweaksOpen] = React.useState(false);
+  const [editModeOn, setEditModeOn] = React.useState(false);
+
+  // Apply accent override
+  React.useEffect(() => {
+    const a = ACCENTS[tweaks.accent] || ACCENTS.indigo;
+    TOKENS.indigo = a.primary;
+    TOKENS.indigoSoft = a.soft;
+  }, [tweaks.accent]);
+
+  const onApply = () => {
+    setApplyCount(c => c + Object.keys(portEdits).length || 1);
+    setPortEdits({});
+  };
+
+  // Keyboard: ⌘K opens palette, ⌘1/2/3 switch view
+  React.useEffect(() => {
+    const h = (e) => {
+      const meta = e.metaKey || e.ctrlKey;
+      if (meta && e.key === 'k') { e.preventDefault(); setPaletteOpen(v => !v); }
+      if (meta && e.key === '1') { e.preventDefault(); setView('canvas'); }
+      if (meta && e.key === '2') { e.preventDefault(); setView('list'); }
+      if (meta && e.key === '3') { e.preventDefault(); setView('table'); }
+      if (e.key === 'Escape' && !paletteOpen) setSelected(null);
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [paletteOpen]);
+
+  // Edit-mode protocol
+  React.useEffect(() => {
+    const h = (e) => {
+      const d = e.data;
+      if (!d || typeof d !== 'object') return;
+      if (d.type === '__activate_edit_mode') { setEditModeOn(true); setTweaksOpen(true); }
+      if (d.type === '__deactivate_edit_mode') { setEditModeOn(false); setTweaksOpen(false); }
+    };
+    window.addEventListener('message', h);
+    window.parent?.postMessage({ type: '__edit_mode_available' }, '*');
+    return () => window.removeEventListener('message', h);
+  }, []);
+
+  const updateTweak = (key, val) => {
+    setTweaks(t => {
+      const next = { ...t, [key]: val };
+      window.parent?.postMessage({ type: '__edit_mode_set_keys', edits: { [key]: val } }, '*');
+      return next;
+    });
+    if (key === 'startView') setView(val);
+    if (key === 'showLog') setShowLog(val);
+  };
+
+  const L = LABELS[lang];
+  const ctx = { lang, L, selectedId, setSelected, hoverId, setHover,
+    view, setView, showLog, setShowLog, portEdits, setPortEdits,
+    applyCount, onApply };
+
+  return (
+    <RailCtx.Provider value={ctx}>
+      <div data-screen-label="B · Rail workspace"
+        style={{ width: '100vw', height: '100vh', background: TOKENS.bg, color: TOKENS.text,
+          fontFamily: lang === 'jp' ? TOKENS.fontJp : TOKENS.fontSans,
+          display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
+        <TopBar onPaletteOpen={() => setPaletteOpen(true)}
+          onLangToggle={() => setLang(l => l === 'en' ? 'jp' : 'en')} />
+        <SecondaryToolbar onPaletteOpen={() => setPaletteOpen(true)} />
+
+        <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+          <LeftRail />
+
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            {view === 'canvas' && <InteractiveTopology />}
+            {view === 'list' && <ListView />}
+            {view === 'table' && <TableView />}
+          </div>
+
+          <Inspector />
+        </div>
+
+        <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+        {editModeOn && <TweaksPanel tweaks={tweaks} update={updateTweak} onClose={() => setTweaksOpen(false)} />}
+      </div>
+    </RailCtx.Provider>
+  );
+}
+
+function TweaksPanel({ tweaks, update }) {
+  const Row = ({ label, children }) => (
+    <div style={{ padding: '10px 14px', borderBottom: `1px solid ${TOKENS.lineSoft}` }}>
+      <div style={{ fontSize: 10, color: TOKENS.textDim, fontFamily: TOKENS.fontMono,
+        letterSpacing: '0.1em', marginBottom: 6, textTransform: 'uppercase' }}>{label}</div>
+      {children}
+    </div>
+  );
+  const swatches = Object.entries(ACCENTS);
+
+  return (
+    <div style={{ position: 'fixed', bottom: 16, right: 16, zIndex: 150, width: 280,
+      background: TOKENS.surface, border: `1px solid ${TOKENS.line}`, borderRadius: 10,
+      boxShadow: '0 20px 50px rgba(0,0,0,0.6)', fontFamily: TOKENS.fontSans,
+      color: TOKENS.text }}>
+      <div style={{ padding: '10px 14px', borderBottom: `1px solid ${TOKENS.line}`,
+        display: 'flex', alignItems: 'center', gap: 8 }}>
+        <IconStroke d={ICONS.settings} size={13} color={TOKENS.textMid} />
+        <span style={{ fontSize: 12, fontWeight: 600, letterSpacing: '-0.01em' }}>Tweaks</span>
+      </div>
+
+      <Row label="Accent">
+        <div style={{ display: 'flex', gap: 6 }}>
+          {swatches.map(([k, a]) => (
+            <button key={k} onClick={() => update('accent', k)}
+              style={{ width: 26, height: 26, borderRadius: 6, border: tweaks.accent === k ? `2px solid #fff` : `1px solid ${TOKENS.line}`,
+                background: a.primary, cursor: 'pointer', padding: 0 }} />
+          ))}
+        </div>
+      </Row>
+
+      <Row label="Start view">
+        {['canvas', 'list', 'table'].map(v => (
+          <button key={v} onClick={() => update('startView', v)}
+            style={{ padding: '4px 10px', fontSize: 11, marginRight: 4,
+              background: tweaks.startView === v ? TOKENS.indigo : TOKENS.bg2,
+              color: tweaks.startView === v ? '#fff' : TOKENS.textMid,
+              border: `1px solid ${tweaks.startView === v ? TOKENS.indigo : TOKENS.line}`,
+              borderRadius: 4, cursor: 'pointer', textTransform: 'capitalize' }}>
+            {v}
+          </button>
+        ))}
+      </Row>
+
+      <Row label="Command log">
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12 }}>
+          <input type="checkbox" checked={tweaks.showLog !== false} onChange={e => update('showLog', e.target.checked)} />
+          <span>Show command log in left rail</span>
+        </label>
+      </Row>
+    </div>
+  );
+}
+
+Object.assign(window, { RailApp, TweaksPanel });
+
+
+ReactDOM.createRoot(document.getElementById('root')).render(<RailApp />);
+
+</script>
+</body>
+</html>

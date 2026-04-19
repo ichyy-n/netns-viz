@@ -10,7 +10,9 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "electron:dev": "NODE_ENV=development electron .",
-    "electron:build": "vite build && electron-builder"
+    "electron:build": "vite build && electron-builder",
+    "presnapshot": "vite build",
+    "snapshot": "node scripts/refactor_snapshot.mjs --out tests/refactor_baseline"
   },
   "build": {
     "appId": "com.netnsviz.app",

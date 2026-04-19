@@ -5,6 +5,7 @@ import { CHAIN_OPTIONS } from "./logic/constants.js";
 import { CIDR_RE, validateCidr, CIDR_ERROR_MSG } from "./logic/validation.js";
 import { getNsHeight, getInterfacePositions } from "./logic/topology.js";
 import { enrichBridgeVlans } from "./logic/enrich.js";
+import { saveFile, loadFile } from "./ipc/file.js";
 const defaultState = () => ({ namespaces: [], bridges: [], veths: [], vlans: [], bridgeVlans: [], routes: [], commands: [] });
 const GUI_STATE_KEY = "netns-viz:gui-state:v1";
 
@@ -1010,13 +1011,13 @@ export default function NetnsVisualizer() {
   /* ── Save / Load ── */
   const saveTopology = useCallback(async () => {
     if (!isElectron()) return;
-    const r = await window.electronAPI.file.save({ ...state, ipForwardMap, iptablesMap });
+    const r = await saveFile({ ...state, ipForwardMap, iptablesMap });
     if (r.success) addExecLog('save', `Saved to ${r.filePath}`);
   }, [state, ipForwardMap, iptablesMap, addExecLog]);
 
   const loadTopology = useCallback(async () => {
     if (!isElectron()) return;
-    const r = await window.electronAPI.file.load();
+    const r = await loadFile();
     if (!r.success) return;
     await applyTopologyData(r.data);
   }, [applyTopologyData]);

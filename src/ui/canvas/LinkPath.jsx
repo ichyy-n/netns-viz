@@ -42,9 +42,9 @@ export default function LinkPath({
       {showTrunkLabel && (
         <g transform={`translate(${mx}, ${my})`}>
           <rect
-            x={-34}
+            x={-36}
             y={-10}
-            width={68}
+            width={72}
             height={20}
             rx={4}
             fill={TOKENS.bg}

@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import { TOKENS } from '../../theme.js';
 import { IconStroke, ICONS } from '../shell/IconStroke.jsx';
 
 const NS_W = 200;
 const NS_H_SWITCH = 110;
 const NS_H_HOST = 94;
+const SHADOW_FILTER = 'drop-shadow(0 4px 6px rgba(0,0,0,0.15))';
 
 function vlanAccentOf(role, vlan) {
   if (role === 'switch') return TOKENS.magenta;
@@ -40,6 +42,7 @@ export default function NodeCard({
   onMouseDown,
   onContextMenu,
 }) {
+  const [hovered, setHovered] = useState(false);
   const role = ns.role || 'host';
   const h = role === 'switch' ? NS_H_SWITCH : NS_H_HOST;
   const x = ns.x ?? 0;
@@ -48,6 +51,9 @@ export default function NodeCard({
   const headerFill = headerFillOf(role, ns.vlan);
   const opacity = dim ? 0.35 : 1;
   const iconPath = role === 'switch' ? ICONS.switch : ICONS.host;
+  const borderActive = selected || hovered;
+  const borderColor = borderActive ? accent : TOKENS.line;
+  const borderWidth = borderActive ? 1.5 : 1;
 
   const portCount = extras?.portCount ?? 3;
   const vlanCount = extras?.vlanCount ?? 2;
@@ -62,17 +68,10 @@ export default function NodeCard({
       onClick={onClick}
       onMouseDown={onMouseDown}
       onContextMenu={onContextMenu}
-      style={{ cursor: 'pointer', transition: 'opacity 0.15s' }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{ cursor: 'pointer', transition: 'opacity 0.15s', filter: SHADOW_FILTER }}
     >
-      <rect
-        x={0}
-        y={3}
-        width={NS_W}
-        height={h}
-        rx={10}
-        fill="rgba(0,0,0,0.35)"
-        opacity={0.5}
-      />
       <rect
         x={0}
         y={0}
@@ -80,8 +79,8 @@ export default function NodeCard({
         height={h}
         rx={10}
         fill={TOKENS.surface2}
-        stroke={selected ? accent : TOKENS.line}
-        strokeWidth={selected ? 1.5 : 1}
+        stroke={borderColor}
+        strokeWidth={borderWidth}
       />
       <rect x={0} y={0} width={NS_W} height={32} rx={10} fill={headerFill} />
       <rect x={0} y={22} width={NS_W} height={10} fill={headerFill} />
@@ -105,7 +104,7 @@ export default function NodeCard({
         y={20}
         textAnchor="end"
         fontSize={9.5}
-        fill={accent}
+        fill={TOKENS.textDim}
         fontFamily={TOKENS.fontMono}
       >
         {role === 'switch' ? 'L2' : `VLAN ${ns.vlan ?? '-'}`}

@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TOKENS } from '../../theme.js';
 import CanvasDefs from './CanvasDefs.jsx';
-import VlanTerritory from './VlanTerritory.jsx';
 import NodeCard from './NodeCard.jsx';
 import LinkPath from './LinkPath.jsx';
-import { computeVlanTerritories, buildLinkGeometry } from '../../logic/rail-view.js';
+import { buildLinkGeometry } from '../../logic/rail-view.js';
 
 const VIEWBOX_W = 1240;
 const VIEWBOX_H = 720;
@@ -34,7 +33,6 @@ export default function RailCanvas({
 
   const namespaces = useMemo(() => railView?.namespaces || [], [railView]);
   const links = useMemo(() => railView?.links || [], [railView]);
-  const territories = useMemo(() => computeVlanTerritories(railView), [railView]);
   const geometry = useMemo(() => buildLinkGeometry(railView), [railView]);
 
   const toSvgPoint = useCallback((clientX, clientY) => {
@@ -231,19 +229,6 @@ export default function RailCanvas({
         <rect width={VIEWBOX_W} height={VIEWBOX_H} fill="url(#dot-grid)" />
         <rect width={VIEWBOX_W} height={VIEWBOX_H} fill="url(#canvas-spot)" />
         <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
-          <g opacity={0.55}>
-            {territories.map((t) => (
-              <VlanTerritory
-                key={`vt-${t.vid}`}
-                vid={t.vid}
-                cx={t.cx}
-                cy={t.cy}
-                rx={t.rx}
-                ry={t.ry}
-                cidr={t.cidr}
-              />
-            ))}
-          </g>
           {geometry.map((g) => (
             <LinkPath
               key={g.id}

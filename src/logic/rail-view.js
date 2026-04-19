@@ -108,8 +108,6 @@ const NS_H_SWITCH = 110;
 const NS_H_HOST = 94;
 const Y_SWITCH = 120;
 const Y_HOST = 420;
-const TERRITORY_RX_MIN = 200;
-const TERRITORY_RY_MIN = 200;
 
 // autoLayout: x/y 未定義 ns のみ座標を算出。x=0 は有効座標として保全。
 // 発動: 初回レンダ時 + 新規 ns 追加時（呼び出し側が制御）。
@@ -138,68 +136,6 @@ export function autoLayout(namespaces, width = 1200, height = 800) {
   });
 
   return result;
-}
-
-// computeVlanTerritories: VLAN ごとに所属 host ns の座標から外接楕円を計算
-// 戻り値: [{ vid, cx, cy, rx, ry, cidr }] — rx/ry ≧ 200 を保証
-export function computeVlanTerritories(railView) {
-  const links = railView?.links || [];
-  const nsById = railView?.nsById || {};
-  const byVid = new Map();
-
-  for (const l of links) {
-    if (l.kind !== 'access' || l.vlan == null) continue;
-    const vid = l.vlan;
-    for (const end of [l.a, l.b]) {
-      const ns = nsById[end.nsId];
-      if (!ns || ns.role !== 'host') continue;
-      if (ns.x == null || ns.y == null) continue;
-      const cx = ns.x + NS_W / 2;
-      const cy = ns.y + NS_H_HOST / 2;
-      if (!byVid.has(vid)) byVid.set(vid, []);
-      byVid.get(vid).push({ cx, cy, ns });
-    }
-  }
-
-  const territories = [];
-  for (const [vid, points] of byVid) {
-    if (points.length === 0) continue;
-    const xs = points.map(p => p.cx);
-    const ys = points.map(p => p.cy);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-    const cx = (minX + maxX) / 2;
-    const cy = (minY + maxY) / 2;
-    const rx = Math.max(TERRITORY_RX_MIN, (maxX - minX) / 2 + 80);
-    const ry = Math.max(TERRITORY_RY_MIN, (maxY - minY) / 2 + 60);
-
-    // CIDR 簡易集約: 同 VLAN ホストの IP 共通プレフィクス + /24 固定
-    const ips = points
-      .map(p => p.ns)
-      .flatMap(ns => {
-        const hits = [];
-        for (const v of railView?.veths || []) {
-          for (const end of ['endA', 'endB']) {
-            if (v[end].nsId === ns.id && v[end].ip) hits.push(v[end].ip);
-          }
-        }
-        return hits;
-      })
-      .map(ip => ip.split('/')[0])
-      .filter(Boolean);
-    let cidr = null;
-    if (ips.length > 0) {
-      const first = ips[0].split('.');
-      cidr = `${first[0]}.${first[1]}.${first[2]}.0/24`;
-    }
-
-    territories.push({ vid, cx, cy, rx, ry, cidr });
-  }
-
-  territories.sort((a, b) => a.vid - b.vid);
-  return territories;
 }
 
 // buildLinkGeometry: veth link のベジェ d 属性とメタ情報を生成

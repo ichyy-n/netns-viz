@@ -5,7 +5,6 @@ import path from 'node:path';
 import {
   buildRailView,
   autoLayout,
-  computeVlanTerritories,
   buildLinkGeometry,
 } from '../rail-view.js';
 
@@ -78,25 +77,6 @@ describe('autoLayout', () => {
   it('既存座標を持つ ns は戻り値に含まれない', () => {
     const result = autoLayout(view.namespaces);
     expect(Object.keys(result)).toHaveLength(0);
-  });
-});
-
-describe('computeVlanTerritories', () => {
-  const view = buildRailView(ch01);
-
-  it('2 territory が生成される (VLAN10/VLAN20)', () => {
-    const territories = computeVlanTerritories(view);
-    expect(territories).toHaveLength(2);
-    const vids = territories.map((t) => t.vid).sort((a, b) => a - b);
-    expect(vids).toEqual([10, 20]);
-  });
-
-  it('各 territory で rx ≧ 200, ry ≧ 200', () => {
-    const territories = computeVlanTerritories(view);
-    for (const t of territories) {
-      expect(t.rx).toBeGreaterThanOrEqual(200);
-      expect(t.ry).toBeGreaterThanOrEqual(200);
-    }
   });
 });
 

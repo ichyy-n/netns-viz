@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { COLORS, NS_COLORS, NS_W, NS_HEADER, NS_ITEM_H } from "./theme.js";
 import { uid } from "./logic/ids.js";
 import { CHAIN_OPTIONS } from "./logic/constants.js";
+import { CIDR_RE, validateCidr, CIDR_ERROR_MSG } from "./logic/validation.js";
 const defaultState = () => ({ namespaces: [], bridges: [], veths: [], vlans: [], bridgeVlans: [], routes: [], commands: [] });
 const GUI_STATE_KEY = "netns-viz:gui-state:v1";
 
@@ -457,10 +458,6 @@ function getInterfacePositions(namespaces, bridges, veths, vlans = []) {
 }
 
 const isElectron = () => Boolean(window.electronAPI);
-
-const CIDR_RE = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}$/;
-const validateCidr = (ip) => !ip || CIDR_RE.test(ip);
-const CIDR_ERROR_MSG = 'IPアドレスにはCIDR表記（例: /24）を含めてください';
 
 /* ══════════════════════════════════════════════
    MAIN APP

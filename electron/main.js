@@ -190,7 +190,7 @@ ipcMain.handle('docker-open-shell', async (event, sessionId, shellCmd) => {
   openShell(sessionId, shellCmd, (data) => {
     try {
       win.webContents.send('stream-data', sessionId, data)
-    } catch (e) {}
+    } catch { /* ignore */ }
   })
   return { success: true }
 })

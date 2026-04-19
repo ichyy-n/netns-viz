@@ -531,7 +531,7 @@ export default function NetnsVisualizer() {
   useEffect(() => {
     try {
       window.sessionStorage.setItem(GUI_STATE_KEY, JSON.stringify(state));
-    } catch {}
+    } catch { /* ignore */ }
   }, [state]);
 
   /* ── Docker ── */

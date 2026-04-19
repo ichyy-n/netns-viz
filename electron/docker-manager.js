@@ -19,7 +19,7 @@ async function findContainerByName() {
     const target = docker.getContainer(CONTAINER_NAME)
     await target.inspect()
     return target
-  } catch (e) {
+  } catch {
     return null
   }
 }
@@ -29,7 +29,7 @@ async function getLiveContainer() {
     try {
       const info = await container.inspect()
       if (info.State?.Running) return container
-    } catch (e) {
+    } catch {
       // fall through and try to re-acquire by name
     }
   }
@@ -45,7 +45,7 @@ async function getLiveContainer() {
     if (!info.State?.Running) return null
     container = byName
     return container
-  } catch (e) {
+  } catch {
     container = null
     return null
   }
@@ -68,7 +68,7 @@ async function buildImage() {
     await image.inspect()
     console.log('Image already exists')
     return IMAGE_NAME
-  } catch (e) {
+  } catch {
     // イメージがないのでビルド
   }
 
@@ -337,10 +337,10 @@ export async function closeShell(sessionId) {
     session.stream.removeAllListeners()
     session.stream.write('exit\n')
     setTimeout(() => {
-      try { session.stream.destroy() } catch (e) {}
+      try { session.stream.destroy() } catch { /* ignore */ }
     }, 500)
-  } catch (e) {
-    try { session.stream.destroy() } catch (e2) {}
+  } catch {
+    try { session.stream.destroy() } catch { /* ignore */ }
   }
   return { success: true }
 }
@@ -383,8 +383,8 @@ export function closeAllShells() {
       session.stream.removeAllListeners()
       session.stream.write('\x03')
       session.stream.write('exit\n')
-      setTimeout(() => { try { session.stream.destroy() } catch (e) {} }, 300)
-    } catch (e) {}
+      setTimeout(() => { try { session.stream.destroy() } catch { /* ignore */ } }, 300)
+    } catch { /* ignore */ }
     if (session.onData) {
       session.onData('\n[スリープにより終了]\n__SHELL_EXIT__')
     }

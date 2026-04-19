@@ -1,0 +1,2 @@
+27:const isElectron = () => Boolean(window.electronAPI);
+32:export default function NetnsVisualizer() {

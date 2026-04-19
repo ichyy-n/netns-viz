@@ -1,7 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { COLORS, NS_COLORS, NS_W, NS_HEADER, NS_ITEM_H } from "./theme.js";
+import { COLORS, NS_COLORS, NS_W } from "./theme.js";
 import { uid } from "./logic/ids.js";
-import { CHAIN_OPTIONS } from "./logic/constants.js";
 import { validateCidr, CIDR_ERROR_MSG } from "./logic/validation.js";
 import { getInterfacePositions } from "./logic/topology.js";
 import { enrichBridgeVlans } from "./logic/enrich.js";
@@ -21,7 +20,6 @@ import { BridgeVlanModal } from "./ui/modals/BridgeVlanModal.jsx";
 import { IptablesModal } from "./ui/modals/IptablesModal.jsx";
 import { HostTerminal } from "./ui/terminal/HostTerminal.jsx";
 import { NsTerminal } from "./ui/terminal/NsTerminal.jsx";
-import { BridgePort } from "./ui/canvas/BridgePort.jsx";
 import { VethEdge } from "./ui/canvas/VethEdge.jsx";
 import { NamespaceNode } from "./ui/canvas/NamespaceNode.jsx";
 import { Canvas } from "./ui/canvas/Canvas.jsx";
@@ -922,8 +920,6 @@ export default function NetnsVisualizer() {
     if (dockerReady && v) { const ns = namespaces.find(n => n.id === v.endA.nsId); if (ns) await execAndLog(`ip netns exec ${ns.name} ip link del ${v.endA.name}`); }
     update(s => { s.veths = s.veths.filter(v => v.id !== id); s.vlans = s.vlans.filter(vl => !(vl.parentType === 'veth' && vl.parentId === id)); s.bridgeVlans = (s.bridgeVlans || []).filter(bv => bv.vethId !== id); });
   };
-
-  const deleteRoute = (id) => update(s => { s.routes = s.routes.filter(r => r.id !== id); });
 
   const deleteCommand = (id) => update(s => { s.commands = s.commands.filter(c => c.id !== id); });
 

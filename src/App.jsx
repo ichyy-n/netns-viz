@@ -24,6 +24,7 @@ import { NsTerminal } from "./ui/terminal/NsTerminal.jsx";
 import { BridgePort } from "./ui/canvas/BridgePort.jsx";
 import { VethEdge } from "./ui/canvas/VethEdge.jsx";
 import { NamespaceNode } from "./ui/canvas/NamespaceNode.jsx";
+import { Canvas } from "./ui/canvas/Canvas.jsx";
 
 const isElectron = () => Boolean(window.electronAPI);
 
@@ -985,12 +986,7 @@ export default function NetnsVisualizer() {
 
           {/* ── Canvas ── */}
           <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
-            <svg ref={svgRef} width="100%" height="100%" style={{ cursor: panning ? "grabbing" : "grab" }} onMouseDown={e => { setVethCtxMenu(null); onBgMouseDown(e); }} onWheel={onWheel}>
-              <rect width="100%" height="100%" fill={COLORS.bg} />
-              <defs><pattern id="grid" width={40*zoom} height={40*zoom} patternUnits="userSpaceOnUse" x={pan.x%(40*zoom)} y={pan.y%(40*zoom)}><circle cx={1} cy={1} r={0.5} fill="#1e293b" /></pattern></defs>
-              <rect width="100%" height="100%" fill="url(#grid)" />
-
-              <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
+            <Canvas svgRef={svgRef} panning={panning} onMouseDown={e => { setVethCtxMenu(null); onBgMouseDown(e); }} onWheel={onWheel} zoom={zoom} pan={pan}>
                 {/* Veth lines */}
                 {veths.map(v => {
                   const pA = ifacePos[v.endA.id], pB = ifacePos[v.endB.id];
@@ -1041,8 +1037,7 @@ export default function NetnsVisualizer() {
                     {dockerReady ? "「+ Namespace」で始めましょう" : isElectron() ? "まず「🐳 Docker起動」をクリック" : "Electronで起動するとDockerと連携できます"}
                   </text>
                 )}
-              </g>
-            </svg>
+            </Canvas>
 
             {/* Veth context menu */}
             {vethCtxMenu && (

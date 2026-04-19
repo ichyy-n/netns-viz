@@ -1,484 +1,30 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-
-const COLORS = {
-  bg: "#0a0e17", surface: "#111827", surfaceHover: "#1a2332",
-  border: "#1e293b", text: "#e2e8f0", textMuted: "#64748b", textDim: "#b6bbc4ff",
-  accent: "#3b82f6", green: "#10b981", greenGlow: "rgba(16,185,129,0.15)",
-  orange: "#f59e0b", orangeGlow: "rgba(245,158,11,0.15)",
-  red: "#ef4444", purple: "#a855f7", cyan: "#06b6d4",
-  cyanGlow: "rgba(6,182,212,0.15)",
-};
-
-const NS_COLORS = ["#3b82f6","#10b981","#f59e0b","#a855f7","#06b6d4","#ef4444","#ec4899","#84cc16"];
-let idCounter = 1;
-const uid = () => `id_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-const defaultState = () => ({ namespaces: [], bridges: [], veths: [], vlans: [], bridgeVlans: [], routes: [], commands: [] });
-const GUI_STATE_KEY = "netns-viz:gui-state:v1";
-
-const CHAIN_OPTIONS = {
-  filter: ['INPUT', 'OUTPUT', 'FORWARD'],
-  nat: ['PREROUTING', 'POSTROUTING', 'OUTPUT'],
-  mangle: ['PREROUTING', 'INPUT', 'OUTPUT', 'FORWARD', 'POSTROUTING'],
-  raw: ['PREROUTING', 'OUTPUT']
-};
-
-// Enrich bridgeVlans entries with vethId/vethEnd/bridgeId if missing (older save format compatibility)
-const enrichBridgeVlans = (bridgeVlans, veths, bridges = []) => {
-  for (const bv of bridgeVlans) {
-    if (!bv.vethId || !bv.vethEnd) {
-      for (const v of veths) {
-        for (const end of ['endA', 'endB']) {
-          if (v[end].name === bv.dev && v[end].nsId === bv.nsId) {
-            bv.vethId = v.id;
-            bv.vethEnd = end;
-            if (!bv.bridgeId && v[end].bridge) bv.bridgeId = v[end].bridge;
-            break;
-          }
-        }
-        if (bv.vethId) break;
-      }
-    }
-    if (!bv.bridgeId) {
-      // Fallback: find bridge in the same namespace
-      const br = bridges.find(b => b.nsId === bv.nsId);
-      if (br) bv.bridgeId = br.id;
-    }
-  }
-};
-
-const loadGuiState = () => {
-  if (typeof window === "undefined") return defaultState();
-  try {
-    const raw = window.sessionStorage.getItem(GUI_STATE_KEY);
-    if (!raw) return defaultState();
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return defaultState();
-    if (!Array.isArray(parsed.namespaces) || !Array.isArray(parsed.bridges) || !Array.isArray(parsed.veths) || !Array.isArray(parsed.routes)) {
-      return defaultState();
-    }
-    if (!Array.isArray(parsed.commands)) parsed.commands = [];
-    if (!Array.isArray(parsed.vlans)) parsed.vlans = [];
-    if (!Array.isArray(parsed.bridgeVlans)) parsed.bridgeVlans = [];
-    enrichBridgeVlans(parsed.bridgeVlans, parsed.veths, parsed.bridges);
-    return parsed;
-  } catch {
-    return defaultState();
-  }
-};
-
-const Icon = ({ d, size = 16, color = COLORS.textMuted }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>
-);
-const Icons = {
-  plus: "M12 5v14M5 12h14",
-  network: "M12 2a10 10 0 100 20 10 10 0 000-20zM2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z",
-  x: "M18 6L6 18M6 6l12 12",
-  terminal: "M4 17l6-5-6-5M12 19h8",
-  code: "M16 18l6-6-6-6M8 6l-6 6 6 6",
-  save: "M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2zM17 21v-8H7v8M7 3v5h8",
-  folder: "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z",
-};
-
-const Btn = ({ children, onClick, color = COLORS.accent, small, ghost, disabled, style, ...props }) => {
-  const [hover, setHover] = useState(false);
-  const bg = ghost ? "transparent" : color;
-  const hoverBg = ghost ? "rgba(255,255,255,0.05)" : color + "dd";
-  return (
-    <button onClick={onClick} disabled={disabled} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: small ? "4px 10px" : "7px 14px",
-        fontSize: small ? 11 : 12, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace",
-        color: ghost ? COLORS.textMuted : "#fff", background: hover && !disabled ? hoverBg : bg,
-        border: ghost ? `1px solid ${COLORS.border}` : "none", borderRadius: 6,
-        cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.4 : 1,
-        transition: "all 0.15s", letterSpacing: "0.02em", ...style }} {...props}>{children}</button>
-  );
-};
-
-const Modal = ({ title, onClose, children, width = 420 }) => {
-  const [pos, setPos] = useState({ x: null, y: null });
-  const [dragging, setDragging] = useState(false);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-  const modalRef = useRef(null);
-
-  // Center on first render
-  useEffect(() => {
-    if (pos.x === null) {
-      setPos({
-        x: Math.max(20, (window.innerWidth - width) / 2),
-        y: Math.max(20, window.innerHeight * 0.15),
-      });
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!dragging) return;
-    const onMove = (e) => {
-      setPos({
-        x: Math.max(0, Math.min(window.innerWidth - 100, e.clientX - dragOffset.x)),
-        y: Math.max(0, Math.min(window.innerHeight - 50, e.clientY - dragOffset.y)),
-      });
-    };
-    const onUp = () => setDragging(false);
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
-  }, [dragging, dragOffset]);
-
-  const onHeaderMouseDown = (e) => {
-    const rect = modalRef.current.getBoundingClientRect();
-    setDragOffset({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-    setDragging(true);
-  };
-
-  if (pos.x === null) return null;
-
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 1000, pointerEvents: "none" }}>
-      <div ref={modalRef} style={{
-        position: "absolute", left: pos.x, top: pos.y, width, pointerEvents: "auto",
-        background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12,
-        maxHeight: "80vh", overflow: "auto", boxShadow: "0 25px 50px rgba(0,0,0,0.5)",
-      }}>
-        <div onMouseDown={onHeaderMouseDown} style={{
-          display: "flex", justifyContent: "space-between", alignItems: "center",
-          padding: "16px 20px", borderBottom: `1px solid ${COLORS.border}`,
-          cursor: "grab", userSelect: "none",
-        }}>
-          <span style={{ color: COLORS.text, fontWeight: 700, fontSize: 14, fontFamily: "'JetBrains Mono', monospace" }}>
-            {title}
-          </span>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
-            <Icon d={Icons.x} color={COLORS.textMuted} />
-          </button>
-        </div>
-        <div style={{ padding: 20 }}>{children}</div>
-      </div>
-    </div>
-  );
-};
-
-const Input = ({ label, value, onChange, placeholder, mono }) => (
-  <label style={{ display: "block", marginBottom: 12 }}>
-    <span style={{ display: "block", fontSize: 11, color: COLORS.textMuted, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.05em", textTransform: "uppercase" }}>{label}</span>
-    <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-      style={{ width: "100%", padding: "8px 12px", fontSize: 13, fontFamily: mono ? "'JetBrains Mono', monospace" : "inherit",
-        color: COLORS.text, background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 6, outline: "none", boxSizing: "border-box" }} />
-  </label>
-);
-
-const Select = ({ label, value, onChange, options }) => (
-  <label style={{ display: "block", marginBottom: 12 }}>
-    <span style={{ display: "block", fontSize: 11, color: COLORS.textMuted, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.05em", textTransform: "uppercase" }}>{label}</span>
-    <select value={value} onChange={e => onChange(e.target.value)}
-      style={{ width: "100%", padding: "8px 12px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace",
-        color: COLORS.text, background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 6, outline: "none", boxSizing: "border-box", appearance: "auto" }}>
-      {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-    </select>
-  </label>
-);
-
-/* ── Per-Namespace Terminal ── */
-const NsTerminal = ({ tabId, ns, dockerReady }) => {
-  const [history, setHistory] = useState([]);
-  const [input, setInput] = useState("");
-  const [cmdHistory, setCmdHistory] = useState([]);
-  const [historyIdx, setHistoryIdx] = useState(-1);
-  const [running, setRunning] = useState(false);
-  const [shellReady, setShellReady] = useState(false);
-  const sessionIdRef = useRef(`${tabId}-shell`);
-  const endRef = useRef(null);
-  const inputRef = useRef(null);
-
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [history]);
-
-  // 永続シェルを開く
-  useEffect(() => {
-    if (!isElectron() || !window.electronAPI.docker.openShell || !dockerReady) return;
-    const sid = sessionIdRef.current;
-    const shellCmd = `ip netns exec ${ns.name} bash`;
-    window.electronAPI.docker.openShell(sid, shellCmd);
-    setShellReady(true);
-    return () => { window.electronAPI.docker.closeShell(sid); };
-  }, [dockerReady, ns.name]);
-
-  // ストリームデータ受信
-  useEffect(() => {
-    if (!isElectron() || !window.electronAPI.stream) return;
-    const cleanup = window.electronAPI.stream.onData((sid, data) => {
-      if (sid !== sessionIdRef.current) return;
-
-      if (data.includes('__SHELL_EXIT__')) {
-        setRunning(false);
-        setShellReady(false);
-        const clean = data.replace('__SHELL_EXIT__', '').trim();
-        if (clean) setHistory(prev => [...prev, { type: "ok", text: clean }]);
-        setHistory(prev => [...prev, { type: "err", text: "[shell exited]" }]);
-      } else if (data.includes('__CMD_DONE__')) {
-        setRunning(false);
-        const clean = data.replace('\n__CMD_DONE__', '').replace('__CMD_DONE__', '').trim();
-        if (clean) setHistory(prev => [...prev, { type: "ok", text: clean }]);
-      } else {
-        setHistory(prev => {
-          const last = prev[prev.length - 1];
-          if (last && last.type === "stream") {
-            const updated = [...prev];
-            updated[updated.length - 1] = { type: "stream", text: last.text + data };
-            return updated;
-          }
-          return [...prev, { type: "stream", text: data }];
-        });
-      }
-    });
-    return cleanup;
-  }, []);
-
-  const runCmd = async () => {
-    const cmd = input.trim();
-    if (!cmd || !dockerReady || !shellReady || running) return;
-    setInput(""); setCmdHistory(prev => [...prev, cmd]); setHistoryIdx(-1);
-    setHistory(prev => [...prev, { type: "cmd", text: cmd }]);
-    setRunning(true);
-
-    try {
-      await window.electronAPI.docker.sendCommand(sessionIdRef.current, cmd);
-    } catch (e) {
-      setHistory(prev => [...prev, { type: "err", text: e.message }]);
-      setRunning(false);
-    }
-    inputRef.current?.focus();
-  };
-
-  const killCmd = async () => {
-    await window.electronAPI.docker.killSession(sessionIdRef.current);
-    setHistory(prev => [...prev, { type: "err", text: "^C" }]);
-    setRunning(false);
-  };
-
-  const sendStdin = async () => {
-    if (!shellReady) return;
-    const text = input;
-    setInput("");
-    if (text) {
-      setCmdHistory(prev => [...prev, text]);
-      setHistory(prev => [...prev, { type: "stdin", text }]);
-    }
-    await window.electronAPI.docker.writeSession(sessionIdRef.current, `${text}\n`);
-  };
-
-  const onKeyDown = (e) => {
-    if (e.key === "c" && e.ctrlKey && running) { e.preventDefault(); killCmd(); return; }
-    if (e.key === "Enter") { e.preventDefault(); if (running) sendStdin(); else runCmd(); }
-    else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      if (!cmdHistory.length) return;
-      const i = historyIdx === -1 ? cmdHistory.length - 1 : Math.max(0, historyIdx - 1);
-      setHistoryIdx(i); setInput(cmdHistory[i]);
-    } else if (e.key === "ArrowDown") {
-      e.preventDefault();
-      if (historyIdx === -1) return;
-      const i = historyIdx + 1;
-      if (i >= cmdHistory.length) { setHistoryIdx(-1); setInput(""); }
-      else { setHistoryIdx(i); setInput(cmdHistory[i]); }
-    } else if (e.key === "l" && e.ctrlKey) { e.preventDefault(); setHistory([]); }
-  };
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }} onClick={() => inputRef.current?.focus()}>
-      <div style={{ flex: 1, overflow: "auto", padding: "8px 10px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.6 }}>
-        <div style={{ color: COLORS.textDim, marginBottom: 4 }}>
-          namespace: <span style={{ color: ns.color }}>{ns.name}</span> — コマンドは <span style={{ color: COLORS.cyan }}>ip netns exec {ns.name}</span> で実行
-        </div>
-        <div style={{ color: COLORS.textDim, marginBottom: 8, fontSize: 10 }}>↑↓: 履歴 · Ctrl+C: 中断 · Ctrl+L: クリア</div>
-        {history.map((entry, i) => (
-          <div key={i}>
-            {(entry.type === "cmd" || entry.type === "stdin")
-              ? <div><span style={{ color: entry.type === "stdin" ? COLORS.cyan : ns.color }}>{entry.type === "stdin" ? ">" : "$"}</span> <span style={{ color: COLORS.text }}>{entry.text}</span></div>
-              : <pre style={{ color: entry.type === "err" ? COLORS.red : COLORS.green, margin: "2px 0 6px 0", padding: 0, whiteSpace: "pre-wrap", wordBreak: "break-all", fontSize: 10, lineHeight: 1.5 }}>{entry.text}</pre>}
-          </div>
-        ))}
-        <div ref={endRef} />
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderTop: `1px solid ${COLORS.border}`, background: COLORS.surface }}>
-        <span style={{ color: ns.color, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>$</span>
-        <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={onKeyDown}
-          placeholder={!shellReady ? "シェル未接続..." : running ? "実行中... (Ctrl+C で中断)" : "コマンドを入力..."} disabled={!dockerReady || !shellReady}
-          style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: COLORS.text, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", padding: "4px 0" }} />
-        {running && (
-          <button onClick={killCmd} style={{ background: COLORS.red, color: "#fff", border: "none", borderRadius: 4, padding: "2px 8px", fontSize: 10, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>Stop</button>
-        )}
-      </div>
-    </div>
-  );
-};
-
-const HostTerminal = ({ tabId, dockerReady }) => {
-  const [history, setHistory] = useState([]);
-  const [input, setInput] = useState("");
-  const [cmdHistory, setCmdHistory] = useState([]);
-  const [historyIdx, setHistoryIdx] = useState(-1);
-  const [running, setRunning] = useState(false);
-  const [shellReady, setShellReady] = useState(false);
-  const sessionIdRef = useRef(`${tabId}-shell`);
-  const endRef = useRef(null);
-  const inputRef = useRef(null);
-
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [history]);
-
-  // 永続シェルを開く
-  useEffect(() => {
-    if (!isElectron() || !window.electronAPI.docker.openShell || !dockerReady) return;
-    const sid = sessionIdRef.current;
-    window.electronAPI.docker.openShell(sid, 'bash');
-    setShellReady(true);
-    return () => { window.electronAPI.docker.closeShell(sid); };
-  }, [dockerReady]);
-
-  // ストリームデータ受信
-  useEffect(() => {
-    if (!isElectron() || !window.electronAPI.stream) return;
-    const cleanup = window.electronAPI.stream.onData((sid, data) => {
-      if (sid !== sessionIdRef.current) return;
-
-      if (data.includes('__SHELL_EXIT__')) {
-        setRunning(false);
-        setShellReady(false);
-        const clean = data.replace('__SHELL_EXIT__', '').trim();
-        if (clean) setHistory(prev => [...prev, { type: "ok", text: clean }]);
-        setHistory(prev => [...prev, { type: "err", text: "[shell exited]" }]);
-      } else if (data.includes('__CMD_DONE__')) {
-        setRunning(false);
-        const clean = data.replace('\n__CMD_DONE__', '').replace('__CMD_DONE__', '').trim();
-        if (clean) setHistory(prev => [...prev, { type: "ok", text: clean }]);
-      } else {
-        setHistory(prev => {
-          const last = prev[prev.length - 1];
-          if (last && last.type === "stream") {
-            const updated = [...prev];
-            updated[updated.length - 1] = { type: "stream", text: last.text + data };
-            return updated;
-          }
-          return [...prev, { type: "stream", text: data }];
-        });
-      }
-    });
-    return cleanup;
-  }, []);
-
-  const runCmd = async () => {
-    const cmd = input.trim();
-    if (!cmd || !dockerReady || !shellReady || running) return;
-    setInput(""); setCmdHistory(prev => [...prev, cmd]); setHistoryIdx(-1);
-    setHistory(prev => [...prev, { type: "cmd", text: cmd }]);
-    setRunning(true);
-
-    try {
-      await window.electronAPI.docker.sendCommand(sessionIdRef.current, cmd);
-    } catch (e) {
-      setHistory(prev => [...prev, { type: "err", text: e.message }]);
-      setRunning(false);
-    }
-    inputRef.current?.focus();
-  };
-
-  const killCmd = async () => {
-    await window.electronAPI.docker.killSession(sessionIdRef.current);
-    setHistory(prev => [...prev, { type: "err", text: "^C" }]);
-    setRunning(false);
-  };
-
-  const sendStdin = async () => {
-    if (!shellReady) return;
-    const text = input;
-    setInput("");
-    if (text) {
-      setCmdHistory(prev => [...prev, text]);
-      setHistory(prev => [...prev, { type: "stdin", text }]);
-    }
-    await window.electronAPI.docker.writeSession(sessionIdRef.current, `${text}\n`);
-  };
-
-  const onKeyDown = (e) => {
-    if (e.key === "c" && e.ctrlKey && running) { e.preventDefault(); killCmd(); return; }
-    if (e.key === "Enter") { e.preventDefault(); if (running) sendStdin(); else runCmd(); }
-    else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      if (!cmdHistory.length) return;
-      const i = historyIdx === -1 ? cmdHistory.length - 1 : Math.max(0, historyIdx - 1);
-      setHistoryIdx(i); setInput(cmdHistory[i]);
-    } else if (e.key === "ArrowDown") {
-      e.preventDefault();
-      if (historyIdx === -1) return;
-      const i = historyIdx + 1;
-      if (i >= cmdHistory.length) { setHistoryIdx(-1); setInput(""); }
-      else { setHistoryIdx(i); setInput(cmdHistory[i]); }
-    } else if (e.key === "l" && e.ctrlKey) { e.preventDefault(); setHistory([]); }
-  };
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }} onClick={() => inputRef.current?.focus()}>
-      <div style={{ flex: 1, overflow: "auto", padding: "8px 10px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.6 }}>
-        <div style={{ color: COLORS.textDim, marginBottom: 4 }}>
-          host terminal: <span style={{ color: COLORS.cyan }}>container Linux host (root namespace)</span> 
-        </div>
-        <div style={{ color: COLORS.textDim, marginBottom: 8, fontSize: 10 }}>↑↓: 履歴 · Ctrl+C: 中断 · Ctrl+L: クリア</div>
-        {history.map((entry, i) => (
-          <div key={i}>
-            {(entry.type === "cmd" || entry.type === "stdin")
-              ? <div><span style={{ color: COLORS.cyan }}>{entry.type === "stdin" ? ">" : "$"}</span> <span style={{ color: COLORS.text }}>{entry.text}</span></div>
-              : <pre style={{ color: entry.type === "err" ? COLORS.red : COLORS.green, margin: "2px 0 6px 0", padding: 0, whiteSpace: "pre-wrap", wordBreak: "break-all", fontSize: 10, lineHeight: 1.5 }}>{entry.text}</pre>}
-          </div>
-        ))}
-        <div ref={endRef} />
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderTop: `1px solid ${COLORS.border}`, background: COLORS.surface }}>
-        <span style={{ color: COLORS.cyan, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>$</span>
-        <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={onKeyDown}
-          placeholder={!shellReady ? "シェル未接続..." : running ? "実行中... (Ctrl+C で中断)" : "コンテナホストコマンドを入力..."} disabled={!dockerReady || !shellReady}
-          style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: COLORS.text, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", padding: "4px 0" }} />
-        {running && (
-          <button onClick={killCmd} style={{ background: COLORS.red, color: "#fff", border: "none", borderRadius: 4, padding: "2px 8px", fontSize: 10, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>Stop</button>
-        )}
-      </div>
-    </div>
-  );
-};
-
-/* ── Canvas helpers ── */
-const NS_W = 380, NS_HEADER = 44, NS_ITEM_H = 44;
-
-function getNsHeight(ns, bridges, veths, vlans = []) {
-  let items = 0;
-  bridges.filter(b => b.nsId === ns.id).forEach(() => items++);
-  veths.forEach(v => { if (v.endA.nsId === ns.id) items++; if (v.endB.nsId === ns.id) items++; });
-  vlans.filter(vl => vl.nsId === ns.id).forEach(() => items++);
-  return NS_HEADER + Math.max(items, 1) * NS_ITEM_H + 16;
-}
-
-function getInterfacePositions(namespaces, bridges, veths, vlans = []) {
-  const pos = {};
-  namespaces.forEach(ns => {
-    let idx = 0;
-    bridges.filter(b => b.nsId === ns.id).forEach(b => {
-      pos[b.id] = { x: ns.x + NS_W, y: ns.y + NS_HEADER + idx * NS_ITEM_H + NS_ITEM_H / 2, side: "right" }; idx++;
-    });
-    veths.forEach(v => {
-      const sideA = v.swapped ? "left" : "right";
-      const sideB = v.swapped ? "right" : "left";
-      if (v.endA.nsId === ns.id) { pos[v.endA.id] = { x: sideA === "right" ? ns.x + NS_W : ns.x, y: ns.y + NS_HEADER + idx * NS_ITEM_H + NS_ITEM_H / 2, side: sideA }; idx++; }
-      if (v.endB.nsId === ns.id) { pos[v.endB.id] = { x: sideB === "left" ? ns.x : ns.x + NS_W, y: ns.y + NS_HEADER + idx * NS_ITEM_H + NS_ITEM_H / 2, side: sideB }; idx++; }
-    });
-    vlans.filter(vl => vl.nsId === ns.id).forEach(vl => {
-      pos[vl.id] = { x: ns.x + NS_W, y: ns.y + NS_HEADER + idx * NS_ITEM_H + NS_ITEM_H / 2, side: "right" }; idx++;
-    });
-  });
-  return pos;
-}
+import { COLORS, NS_COLORS, NS_W } from "./theme.js";
+import { uid } from "./logic/ids.js";
+import { validateCidr, CIDR_ERROR_MSG } from "./logic/validation.js";
+import { getInterfacePositions } from "./logic/topology.js";
+import { enrichBridgeVlans } from "./logic/enrich.js";
+import { defaultState, loadGuiState, saveGuiState } from "./logic/state.js";
+import { saveFile, loadFile } from "./ipc/file.js";
+import { dockerStart, dockerExec, onDockerStatus } from "./ipc/docker.js";
+import { openShell, closeShell, sendCommand, killSession, writeSession, onShellData } from "./ipc/shell.js";
+import { Icon, Icons } from "./ui/primitives/Icon.jsx";
+import { Btn } from "./ui/primitives/Btn.jsx";
+import { Input } from "./ui/primitives/Input.jsx";
+import { Select } from "./ui/primitives/Select.jsx";
+import { Modal } from "./ui/primitives/Modal.jsx";
+import { RouteModal } from "./ui/modals/RouteModal.jsx";
+import { IfaceModal } from "./ui/modals/IfaceModal.jsx";
+import { VlanModal } from "./ui/modals/VlanModal.jsx";
+import { BridgeVlanModal } from "./ui/modals/BridgeVlanModal.jsx";
+import { IptablesModal } from "./ui/modals/IptablesModal.jsx";
+import { HostTerminal } from "./ui/terminal/HostTerminal.jsx";
+import { NsTerminal } from "./ui/terminal/NsTerminal.jsx";
+import { VethEdge } from "./ui/canvas/VethEdge.jsx";
+import { NamespaceNode } from "./ui/canvas/NamespaceNode.jsx";
+import { Canvas } from "./ui/canvas/Canvas.jsx";
 
 const isElectron = () => Boolean(window.electronAPI);
-
-const CIDR_RE = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}$/;
-const validateCidr = (ip) => !ip || CIDR_RE.test(ip);
-const CIDR_ERROR_MSG = 'IPアドレスにはCIDR表記（例: /24）を含めてください';
 
 /* ══════════════════════════════════════════════
    MAIN APP
@@ -514,7 +60,7 @@ export default function NetnsVisualizer() {
   const logEndRef = useRef(null);
 
   const { namespaces, bridges, veths, vlans, bridgeVlans, routes, commands } = state;
-  const [showVlanSubIface, setShowVlanSubIface] = useState(false);
+  const [showVlanSubIface] = useState(false);
   const [ipForwardMap, setIpForwardMap] = useState({});
   const [iptablesMap, setIptablesMap] = useState({});
   const [iptablesModal, setIptablesModal] = useState(null);
@@ -530,9 +76,7 @@ export default function NetnsVisualizer() {
   const addExecLog = useCallback((cmd, output, ok = true) => setExecLog(prev => [...prev, { cmd, output, success: ok, time: new Date().toLocaleTimeString() }]), []);
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [execLog]);
   useEffect(() => {
-    try {
-      window.sessionStorage.setItem(GUI_STATE_KEY, JSON.stringify(state));
-    } catch {}
+    saveGuiState(state);
   }, [state]);
 
   /* ── Docker ── */
@@ -540,7 +84,7 @@ export default function NetnsVisualizer() {
     if (!isElectron()) return;
     setDockerLoading(true);
     try {
-      const r = await window.electronAPI.docker.start();
+      const r = await dockerStart();
       if (r.success) { setDockerReady(true); addExecLog('docker start', 'Container started'); }
     } catch (e) { addExecLog('docker start', e.message, false); }
     setDockerLoading(false);
@@ -548,7 +92,7 @@ export default function NetnsVisualizer() {
 
   useEffect(() => {
     if (!isElectron() || !window.electronAPI.status?.onDockerStatus) return;
-    return window.electronAPI.status.onDockerStatus((payload) => {
+    return onDockerStatus((payload) => {
       if (payload?.source !== 'resume') return;
       // まずdockerReadyをfalseにして全ターミナルのuseEffectクリーンアップを発火
       setDockerReady(false);
@@ -570,7 +114,7 @@ export default function NetnsVisualizer() {
       // ip_forward: Linux実態を読み取り
       const fwUpdates = {};
       for (const ns of namespaces) {
-        const r = await window.electronAPI.docker.exec(`ip netns exec ${ns.name} cat /proc/sys/net/ipv4/ip_forward`);
+        const r = await dockerExec(`ip netns exec ${ns.name} cat /proc/sys/net/ipv4/ip_forward`);
         if (r.success) fwUpdates[ns.id] = (r.output || '').trim() === '1';
       }
       if (Object.keys(fwUpdates).length) setIpForwardMap(prev => ({ ...prev, ...fwUpdates }));
@@ -581,7 +125,7 @@ export default function NetnsVisualizer() {
         if (!ns || !rules.length) continue;
         for (const rule of rules) {
           const extraPart = rule.extra ? ` ${rule.extra}` : '';
-          await window.electronAPI.docker.exec(`ip netns exec ${ns.name} iptables -t ${rule.table} -A ${rule.chain}${extraPart} -j ${rule.target}`);
+          await dockerExec(`ip netns exec ${ns.name} iptables -t ${rule.table} -A ${rule.chain}${extraPart} -j ${rule.target}`);
         }
       }
 
@@ -593,7 +137,7 @@ export default function NetnsVisualizer() {
         if (bv.devType === 'self') cmd += ' self';
         if (bv.pvid) cmd += ' pvid';
         if (bv.untagged) cmd += ' untagged';
-        await window.electronAPI.docker.exec(cmd);
+        await dockerExec(cmd);
       }
     };
     syncOnResume();
@@ -601,7 +145,7 @@ export default function NetnsVisualizer() {
 
   const execAndLog = useCallback(async (cmd) => {
     if (!isElectron() || !dockerReady) return { success: false, output: 'Docker not ready' };
-    const r = await window.electronAPI.docker.exec(cmd);
+    const r = await dockerExec(cmd);
     addExecLog(cmd, r.output || (r.success ? 'OK' : 'Failed'), r.success);
     return r;
   }, [dockerReady, addExecLog]);
@@ -645,7 +189,7 @@ export default function NetnsVisualizer() {
     let fwResult = {};
     if (dockerReady) {
       addExecLog('load', 'Cleaning current environment...');
-      const listResult = await window.electronAPI.docker.exec('ip netns list');
+      const listResult = await dockerExec('ip netns list');
       if (listResult.success && listResult.output) {
         const existingNs = listResult.output.trim().split('\n')
           .map(line => line.split(/\s/)[0]).filter(Boolean);
@@ -740,7 +284,7 @@ export default function NetnsVisualizer() {
       // Read actual Linux ip_forward state for all namespaces
       const fwUpdates = {};
       for (const ns of data.namespaces) {
-        const fwRes = await window.electronAPI.docker.exec(
+        const fwRes = await dockerExec(
           `ip netns exec ${ns.name} cat /proc/sys/net/ipv4/ip_forward`
         );
         if (fwRes.success) {
@@ -763,8 +307,8 @@ export default function NetnsVisualizer() {
   const fetchIfaceRuntime = useCallback(async (ifaceName, nsName) => {
     if (!dockerReady) return { ip: "", mac: null };
     const [ipRes, macRes] = await Promise.all([
-      window.electronAPI.docker.exec(`ip netns exec ${nsName} sh -lc "ip -o -4 addr show dev ${ifaceName} 2>/dev/null | awk '{print \\$4; exit}'"`),
-      window.electronAPI.docker.exec(`ip netns exec ${nsName} cat /sys/class/net/${ifaceName}/address 2>/dev/null`),
+      dockerExec(`ip netns exec ${nsName} sh -lc "ip -o -4 addr show dev ${ifaceName} 2>/dev/null | awk '{print \\$4; exit}'"`),
+      dockerExec(`ip netns exec ${nsName} cat /sys/class/net/${ifaceName}/address 2>/dev/null`),
     ]);
     return {
       ip: ipRes.success ? (ipRes.output || "").trim() : "",
@@ -834,7 +378,7 @@ export default function NetnsVisualizer() {
 
   const closeTermTab = useCallback((tabId) => {
     if (isElectron() && window.electronAPI.docker.closeShell) {
-      window.electronAPI.docker.closeShell(`${tabId}-shell`);
+      closeShell(`${tabId}-shell`);
     }
     setTerminalTabs(prev => {
       const next = prev.filter(t => t.tabId !== tabId);
@@ -1002,7 +546,7 @@ export default function NetnsVisualizer() {
 
   const showRouteTable = useCallback(async (ns) => {
     if (!dockerReady) return;
-    const r = await window.electronAPI.docker.exec(`ip netns exec ${ns.name} ip route show`);
+    const r = await dockerExec(`ip netns exec ${ns.name} ip route show`);
     setRouteModal({ nsId: ns.id, nsName: ns.name, nsColor: ns.color, routes: r.success ? r.output : 'Failed to fetch routes' });
   }, [dockerReady]);
 
@@ -1010,13 +554,13 @@ export default function NetnsVisualizer() {
     if (!dockerReady) return;
     const br = bridges.find(b => b.nsId === ns.id);
     if (!br) return;
-    const r = await window.electronAPI.docker.exec(`ip netns exec ${ns.name} bridge fdb show br ${br.name}`);
+    const r = await dockerExec(`ip netns exec ${ns.name} bridge fdb show br ${br.name}`);
     setMacTableModal({ nsId: ns.id, nsName: ns.name, nsColor: ns.color, entries: r.success ? r.output : 'Failed to fetch MAC table' });
   }, [dockerReady, bridges]);
 
   const showArpTable = useCallback(async (ns) => {
     if (!dockerReady) return;
-    const r = await window.electronAPI.docker.exec(`ip netns exec ${ns.name} ip neigh show`);
+    const r = await dockerExec(`ip netns exec ${ns.name} ip neigh show`);
     setArpTableModal({ nsId: ns.id, nsName: ns.name, nsColor: ns.color, entries: r.success ? r.output : 'Failed to fetch ARP table' });
   }, [dockerReady]);
 
@@ -1082,13 +626,13 @@ export default function NetnsVisualizer() {
   /* ── Save / Load ── */
   const saveTopology = useCallback(async () => {
     if (!isElectron()) return;
-    const r = await window.electronAPI.file.save({ ...state, ipForwardMap, iptablesMap });
+    const r = await saveFile({ ...state, ipForwardMap, iptablesMap });
     if (r.success) addExecLog('save', `Saved to ${r.filePath}`);
   }, [state, ipForwardMap, iptablesMap, addExecLog]);
 
   const loadTopology = useCallback(async () => {
     if (!isElectron()) return;
-    const r = await window.electronAPI.file.load();
+    const r = await loadFile();
     if (!r.success) return;
     await applyTopologyData(r.data);
   }, [applyTopologyData]);
@@ -1319,11 +863,11 @@ export default function NetnsVisualizer() {
           const nsB = namespaces.find(n => n.id === data.endBNs);
           const updates = {};
           if (nsA) {
-            const r = await window.electronAPI.docker.exec(`ip netns exec ${nsA.name} cat /sys/class/net/${data.endAName}/address 2>/dev/null`);
+            const r = await dockerExec(`ip netns exec ${nsA.name} cat /sys/class/net/${data.endAName}/address 2>/dev/null`);
             if (r.success && r.output.trim()) updates.macA = r.output.trim();
           }
           if (nsB) {
-            const r = await window.electronAPI.docker.exec(`ip netns exec ${nsB.name} cat /sys/class/net/${data.endBName}/address 2>/dev/null`);
+            const r = await dockerExec(`ip netns exec ${nsB.name} cat /sys/class/net/${data.endBName}/address 2>/dev/null`);
             if (r.success && r.output.trim()) updates.macB = r.output.trim();
           }
           if (updates.macA || updates.macB) {
@@ -1376,8 +920,6 @@ export default function NetnsVisualizer() {
     if (dockerReady && v) { const ns = namespaces.find(n => n.id === v.endA.nsId); if (ns) await execAndLog(`ip netns exec ${ns.name} ip link del ${v.endA.name}`); }
     update(s => { s.veths = s.veths.filter(v => v.id !== id); s.vlans = s.vlans.filter(vl => !(vl.parentType === 'veth' && vl.parentId === id)); s.bridgeVlans = (s.bridgeVlans || []).filter(bv => bv.vethId !== id); });
   };
-
-  const deleteRoute = (id) => update(s => { s.routes = s.routes.filter(r => r.id !== id); });
 
   const deleteCommand = (id) => update(s => { s.commands = s.commands.filter(c => c.id !== id); });
 
@@ -1440,12 +982,7 @@ export default function NetnsVisualizer() {
 
           {/* ── Canvas ── */}
           <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
-            <svg ref={svgRef} width="100%" height="100%" style={{ cursor: panning ? "grabbing" : "grab" }} onMouseDown={e => { setVethCtxMenu(null); onBgMouseDown(e); }} onWheel={onWheel}>
-              <rect width="100%" height="100%" fill={COLORS.bg} />
-              <defs><pattern id="grid" width={40*zoom} height={40*zoom} patternUnits="userSpaceOnUse" x={pan.x%(40*zoom)} y={pan.y%(40*zoom)}><circle cx={1} cy={1} r={0.5} fill="#1e293b" /></pattern></defs>
-              <rect width="100%" height="100%" fill="url(#grid)" />
-
-              <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
+            <Canvas svgRef={svgRef} panning={panning} onMouseDown={e => { setVethCtxMenu(null); onBgMouseDown(e); }} onWheel={onWheel} zoom={zoom} pan={pan}>
                 {/* Veth lines */}
                 {veths.map(v => {
                   const pA = ifacePos[v.endA.id], pB = ifacePos[v.endB.id];
@@ -1453,180 +990,50 @@ export default function NetnsVisualizer() {
                   const cp1x = pA.side === "right" ? pA.x+80 : pA.x-80;
                   const cp2x = pB.side === "left" ? pB.x-80 : pB.x+80;
                   return (
-                    <g key={v.id} onContextMenu={e => { e.preventDefault(); setVethCtxMenu({ vethId: v.id, x: e.clientX, y: e.clientY }); }}>
-                      <path d={`M${pA.x},${pA.y} C${cp1x},${pA.y} ${cp2x},${pB.y} ${pB.x},${pB.y}`} stroke={COLORS.orange} strokeWidth={2} fill="none" strokeDasharray="6 4" opacity={0.6} />
-                      <path d={`M${pA.x},${pA.y} C${cp1x},${pA.y} ${cp2x},${pB.y} ${pB.x},${pB.y}`} stroke="transparent" strokeWidth={12} fill="none" />
-                      <circle cx={pA.x} cy={pA.y} r={4} fill={COLORS.orange} /><circle cx={pB.x} cy={pB.y} r={4} fill={COLORS.orange} />
-                      <text x={(pA.x+pB.x)/2} y={Math.min(pA.y,pB.y)-10} textAnchor="middle" fontSize={9} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace">{v.name}</text>
-                    </g>);
+                    <VethEdge key={v.id} v={v} pA={pA} pB={pB} cp1x={cp1x} cp2x={cp2x} setVethCtxMenu={setVethCtxMenu} />
+                  );
                 })}
 
                 {/* Namespace boxes */}
-                {namespaces.map(ns => {
-                  const h = getNsHeight(ns, bridges, veths, vlans);
-                  const isSel = selected === ns.id;
-                  return (
-                    <g key={ns.id} onMouseDown={e => onMouseDown(e, ns.id)} style={{ cursor: "move" }}>
-                      <rect x={ns.x+3} y={ns.y+3} width={NS_W} height={h} rx={10} fill="rgba(0,0,0,0.3)" />
-                      <rect x={ns.x} y={ns.y} width={NS_W} height={h} rx={10} fill={COLORS.surface} stroke={isSel ? ns.color : COLORS.border} strokeWidth={isSel ? 2 : 1} onClick={e => { e.stopPropagation(); setSelected(ns.id); }} />
-                      <rect x={ns.x} y={ns.y} width={NS_W} height={NS_HEADER} rx={10} fill={ns.color+"18"} />
-                      <rect x={ns.x} y={ns.y+NS_HEADER-1} width={NS_W} height={2} fill={ns.color+"30"} />
-                      <circle cx={ns.x+18} cy={ns.y+NS_HEADER/2} r={5} fill={ns.color} />
-                      <text x={ns.x+32} y={ns.y+NS_HEADER/2+1} dominantBaseline="middle" fontSize={13} fontWeight="700" fill={COLORS.text} fontFamily="'JetBrains Mono', monospace">{ns.name}</text>
-                      
-                      {/* MT (MAC Table) button (bridge namespaces only) */}
-                      {dockerReady && bridges.some(b => b.nsId === ns.id) && (
-                        <g onClick={e => { e.stopPropagation(); showMacTable(ns); }} style={{ cursor: "pointer" }}>
-                          <rect x={ns.x+NS_W-244} y={ns.y+10} width={28} height={22} rx={4} fill={ns.color+"20"} />
-                          <text x={ns.x+NS_W-230} y={ns.y+23} fontSize={9} fill={ns.color} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">MT</text>
-                        </g>
-                      )}
-
-                      {/* AT (ARP Table) button */}
-                      {dockerReady && (
-                        <g onClick={e => { e.stopPropagation(); showArpTable(ns); }} style={{ cursor: "pointer" }}>
-                          <rect x={ns.x+NS_W-212} y={ns.y+10} width={28} height={22} rx={4} fill={ns.color+"20"} />
-                          <text x={ns.x+NS_W-198} y={ns.y+23} fontSize={9} fill={ns.color} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">AT</text>
-                        </g>
-                      )}
-
-                      {/* RT (Route Table) button */}
-                      {dockerReady && (
-                        <g onClick={e => { e.stopPropagation(); showRouteTable(ns); }} style={{ cursor: "pointer" }}>
-                          <rect x={ns.x+NS_W-180} y={ns.y+10} width={28} height={22} rx={4} fill={ns.color+"20"} />
-                          <text x={ns.x+NS_W-166} y={ns.y+23} fontSize={10} fill={ns.color} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">RT</text>
-                        </g>
-                      )}
-
-                      {/* ip_forward toggle (FWD) */}
-                      {dockerReady && (
-                        <g onClick={e => { e.stopPropagation(); toggleIpForward(ns); }} style={{ cursor: "pointer" }}>
-                          <rect x={ns.x+NS_W-148} y={ns.y+10} width={28} height={22} rx={4} fill={ipForwardMap[ns.id] ? (ns.color || COLORS.green)+"20" : COLORS.border} />
-                          <text x={ns.x+NS_W-134} y={ns.y+23} fontSize={10} fill={ipForwardMap[ns.id] ? (ns.color || COLORS.green) : COLORS.textDim} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">FWD</text>
-                        </g>
-                      )}
-
-                      {/* iptables button (IPT) */}
-                      {dockerReady && (
-                        <g onClick={e => { e.stopPropagation(); showIptables(ns); }} style={{ cursor: "pointer" }}>
-                          <rect x={ns.x+NS_W-116} y={ns.y+10} width={28} height={22} rx={4}
-                            fill={(iptablesMap[ns.id]?.length) ? ns.color+"20" : COLORS.border} />
-                          <text x={ns.x+NS_W-102} y={ns.y+23} fontSize={9} fill={(iptablesMap[ns.id]?.length) ? ns.color : COLORS.textDim}
-                            fontFamily="'JetBrains Mono', monospace" textAnchor="middle" fontWeight="700">IPT</text>
-                        </g>
-                      )}
-
-                      {/* Terminal button */}
-                      {dockerReady && (
-                        <g onClick={e => { e.stopPropagation(); openTerminal(ns); }} style={{ cursor: "pointer" }}>
-                          <rect x={ns.x+NS_W-84} y={ns.y+10} width={22} height={22} rx={4} fill={ns.color+"20"} />
-                          <text x={ns.x+NS_W-73} y={ns.y+23} fontSize={11} fill={ns.color} fontFamily="'JetBrains Mono', monospace" textAnchor="middle">{">_"}</text>
-                        </g>
-                      )}
-
-                      {/* Delete */}
-                      <g onClick={e => { e.stopPropagation(); deleteNs(ns.id); }} style={{ cursor: "pointer" }}>
-                        <rect x={ns.x+NS_W-32} y={ns.y+10} width={22} height={22} rx={4} fill="transparent" />
-                        <line x1={ns.x+NS_W-25} y1={ns.y+17} x2={ns.x+NS_W-17} y2={ns.y+25} stroke={COLORS.textDim} strokeWidth={1.5} />
-                        <line x1={ns.x+NS_W-17} y1={ns.y+17} x2={ns.x+NS_W-25} y2={ns.y+25} stroke={COLORS.textDim} strokeWidth={1.5} />
-                      </g>
-
-                      {/* Interfaces */}
-                      {(() => {
-                        let idx = 0; const items = [];
-                        bridges.filter(b => b.nsId === ns.id).forEach(b => {
-                          const y = ns.y + NS_HEADER + idx * NS_ITEM_H;
-                          items.push(<g key={b.id}>
-                            <rect x={ns.x+8} y={y+4} width={NS_W-16} height={NS_ITEM_H-6} rx={4} fill={COLORS.greenGlow} />
-                            <text x={ns.x+20} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" fontSize={11} fill={COLORS.green} fontFamily="'JetBrains Mono', monospace" fontWeight="600">🌉 {b.name}</text>
-                            {b.ip && <text x={ns.x+NS_W-100} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" textAnchor="end" fontSize={10} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace">{b.ip}</text>}
-                            {dockerReady && (
-                              <g onClick={e => { e.stopPropagation(); toggleBridgeVlanFiltering(b.id); }} style={{ cursor: "pointer" }}>
-                                <rect x={ns.x+NS_W-72} y={y+8} width={36} height={18} rx={9} fill={b.vlanFiltering ? COLORS.cyan+"40" : COLORS.border} />
-                                <circle cx={b.vlanFiltering ? ns.x+NS_W-45 : ns.x+NS_W-63} cy={y+17} r={6} fill={b.vlanFiltering ? COLORS.cyan : COLORS.textDim} />
-                                <text x={ns.x+NS_W-54} y={y+32} textAnchor="middle" fontSize={7} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace">VLAN</text>
-                              </g>
-                            )}
-                            <g onClick={e => { e.stopPropagation(); deleteBridge(b.id); }} style={{ cursor: "pointer" }}><text x={ns.x+NS_W-24} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" fontSize={10} fill={COLORS.red} style={{ opacity: 0.5 }}>✕</text></g>
-                          </g>); idx++;
-                        });
-                        veths.forEach(v => { ["endA","endB"].forEach(end => {
-                          if (v[end].nsId === ns.id) {
-                            const y = ns.y + NS_HEADER + idx * NS_ITEM_H;
-                            const brName = v[end].bridge ? bridges.find(b => b.id === v[end].bridge)?.name : null;
-                            items.push(<g key={v[end].id}>
-                              <rect x={ns.x+8} y={y+4} width={NS_W-16} height={NS_ITEM_H-6} rx={4} fill={COLORS.orangeGlow}
-                                onClick={e => { e.stopPropagation(); const nsObj = namespaces.find(n => n.id === v[end].nsId); if (dockerReady && nsObj) openIfaceModal(v.id, end, v[end].name, nsObj.name, v[end].ip, v[end].mac); }}
-                                style={{ cursor: dockerReady ? "pointer" : "default" }} />
-                              <text x={ns.x+20} y={y+16} dominantBaseline="middle" fontSize={11} fill={COLORS.orange} fontFamily="'JetBrains Mono', monospace" fontWeight="600"
-                                onClick={e => { e.stopPropagation(); const nsObj = namespaces.find(n => n.id === v[end].nsId); if (dockerReady && nsObj) openIfaceModal(v.id, end, v[end].name, nsObj.name, v[end].ip, v[end].mac); }}
-                                style={{ cursor: dockerReady ? "pointer" : "default" }}>🔗 {v[end].name}</text>
-                              <text x={ns.x+NS_W-50} y={y+16} dominantBaseline="middle" textAnchor="end" fontSize={10} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace"
-                                onClick={e => { e.stopPropagation(); const nsObj = namespaces.find(n => n.id === v[end].nsId); if (dockerReady && nsObj) openIfaceModal(v.id, end, v[end].name, nsObj.name, v[end].ip, v[end].mac); }}
-                                style={{ cursor: dockerReady ? "pointer" : "default" }}>
-                                {v[end].ip||""}{brName ? ` → ${brName}` : ""}
-                              </text>
-                              {v[end].mac && (
-                                <text x={ns.x+NS_W-50} y={y+30} dominantBaseline="middle" textAnchor="end" fontSize={10} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace"
-                                  onClick={e => { e.stopPropagation(); const nsObj = namespaces.find(n => n.id === v[end].nsId); if (dockerReady && nsObj) openIfaceModal(v.id, end, v[end].name, nsObj.name, v[end].ip, v[end].mac); }}
-                                  style={{ cursor: dockerReady ? "pointer" : "default" }}>
-                                  {v[end].mac}
-                                </text>
-                              )}
-                              {/* VL button - bridge VLAN config */}
-                              {dockerReady && v[end].bridge && (() => {
-                                const br = bridges.find(bb => bb.id === v[end].bridge);
-                                if (!br || !br.vlanFiltering) return null;
-                                return (
-                                  <g onClick={e => { e.stopPropagation(); openBridgeVlanModal(br.id, br.name, v[end].name, 'port', v.id, end, v[end].nsId); }} style={{ cursor: "pointer" }}>
-                                    <rect x={ns.x+42} y={y+24} width={20} height={14} rx={3} fill={COLORS.cyan+"30"} />
-                                    <text x={ns.x+52} y={y+33} textAnchor="middle" fontSize={8} fill={COLORS.cyan} fontFamily="'JetBrains Mono', monospace" fontWeight="700">VL</text>
-                                  </g>
-                                );
-                              })()}
-                              {/* Port mode display A:/T: */}
-                              {v[end].bridge && (() => {
-                                const bvs = bridgeVlans.filter(bv => bv.vethId === v.id && bv.vethEnd === end);
-                                if (!bvs.length) return null;
-                                const isAccess = bvs.length === 1 && bvs[0].pvid && bvs[0].untagged;
-                                return (
-                                  <text x={ns.x+68} y={y+33} fontSize={8} fill={COLORS.cyan} fontFamily="'JetBrains Mono', monospace">
-                                    {isAccess ? `A:${bvs[0].vid}` : `T:${bvs.map(b=>b.vid).join(',')}`}
-                                  </text>
-                                );
-                              })()}
-                              {/* V button - endpoint VLAN sub-interface */}
-                              {dockerReady && !v[end].bridge && showVlanSubIface && (
-                                <g onClick={e => { e.stopPropagation(); openVlanModal(v.id, end, v[end].name, v[end].nsId); }} style={{ cursor: "pointer" }}>
-                                  <rect x={ns.x+42} y={y+24} width={14} height={14} rx={3} fill={COLORS.orange+"30"} />
-                                  <text x={ns.x+49} y={y+33} textAnchor="middle" fontSize={8} fill={COLORS.orange} fontFamily="'JetBrains Mono', monospace" fontWeight="700">V</text>
-                                </g>
-                              )}
-                              <g onClick={e => { e.stopPropagation(); deleteVeth(v.id); }} style={{ cursor: "pointer" }}><text x={ns.x+NS_W-24} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" fontSize={10} fill={COLORS.red} style={{ opacity: 0.5 }}>✕</text></g>
-                            </g>); idx++;
-                          }
-                        }); });
-                        vlans.filter(vl => vl.nsId === ns.id).forEach(vl => {
-                          const y = ns.y + NS_HEADER + idx * NS_ITEM_H;
-                          items.push(<g key={vl.id}>
-                            <rect x={ns.x+8} y={y+4} width={NS_W-16} height={NS_ITEM_H-6} rx={4} fill={COLORS.cyanGlow} />
-                            <text x={ns.x+20} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" fontSize={11} fill={COLORS.cyan} fontFamily="'JetBrains Mono', monospace" fontWeight="600">🏷 {vl.name}</text>
-                            {vl.ip && <text x={ns.x+NS_W-50} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" textAnchor="end" fontSize={10} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace">{vl.ip}</text>}
-                            <g onClick={e => { e.stopPropagation(); deleteVlan(vl.id); }} style={{ cursor: "pointer" }}><text x={ns.x+NS_W-24} y={y+NS_ITEM_H/2+2} dominantBaseline="middle" fontSize={10} fill={COLORS.red} style={{ opacity: 0.5 }}>✕</text></g>
-                          </g>); idx++;
-                        });
-                        return items;
-                      })()}
-                    </g>);
-                })}
+                {namespaces.map(ns => (
+                  <NamespaceNode
+                    key={ns.id}
+                    ns={ns}
+                    selected={selected}
+                    onMouseDown={onMouseDown}
+                    setSelected={setSelected}
+                    dockerReady={dockerReady}
+                    bridges={bridges}
+                    veths={veths}
+                    vlans={vlans}
+                    namespaces={namespaces}
+                    bridgeVlans={bridgeVlans}
+                    ipForwardMap={ipForwardMap}
+                    iptablesMap={iptablesMap}
+                    showVlanSubIface={showVlanSubIface}
+                    showMacTable={showMacTable}
+                    showArpTable={showArpTable}
+                    showRouteTable={showRouteTable}
+                    toggleIpForward={toggleIpForward}
+                    showIptables={showIptables}
+                    openTerminal={openTerminal}
+                    deleteNs={deleteNs}
+                    toggleBridgeVlanFiltering={toggleBridgeVlanFiltering}
+                    deleteBridge={deleteBridge}
+                    openIfaceModal={openIfaceModal}
+                    openBridgeVlanModal={openBridgeVlanModal}
+                    openVlanModal={openVlanModal}
+                    deleteVeth={deleteVeth}
+                    deleteVlan={deleteVlan}
+                  />
+                ))}
 
                 {!namespaces.length && (
                   <text x={300} y={200} textAnchor="middle" fontSize={14} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace">
                     {dockerReady ? "「+ Namespace」で始めましょう" : isElectron() ? "まず「🐳 Docker起動」をクリック" : "Electronで起動するとDockerと連携できます"}
                   </text>
                 )}
-              </g>
-            </svg>
+            </Canvas>
 
             {/* Veth context menu */}
             {vethCtxMenu && (
@@ -1694,8 +1101,8 @@ export default function NetnsVisualizer() {
               {terminalTabs.map(tab => (
                 <div key={tab.tabId} style={{ display: activeTermTab === tab.tabId ? "flex" : "none", height: "100%", flexDirection: "column" }}>
                   {tab.kind === 'host'
-                    ? <HostTerminal tabId={tab.tabId} dockerReady={dockerReady} />
-                    : <NsTerminal tabId={tab.tabId} ns={{ id: tab.nsId, name: tab.nsName, color: tab.color }} dockerReady={dockerReady} />}
+                    ? <HostTerminal tabId={tab.tabId} dockerReady={dockerReady} isElectron={isElectron} openShell={openShell} closeShell={closeShell} sendCommand={sendCommand} killSession={killSession} writeSession={writeSession} onShellData={onShellData} />
+                    : <NsTerminal tabId={tab.tabId} ns={{ id: tab.nsId, name: tab.nsName, color: tab.color }} dockerReady={dockerReady} isElectron={isElectron} openShell={openShell} closeShell={closeShell} sendCommand={sendCommand} killSession={killSession} writeSession={writeSession} onShellData={onShellData} />}
                 </div>
               ))}
             </div>
@@ -1789,15 +1196,7 @@ export default function NetnsVisualizer() {
       )}
 
       {routeModal && (
-        <Modal title={`Routing Table: ${routeModal.nsName}`} onClose={() => setRouteModal(null)} width={500}>
-          <pre style={{ background: COLORS.bg, color: COLORS.green, padding: 16, borderRadius: 8, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.7, border: `1px solid ${COLORS.border}`, whiteSpace: "pre-wrap", maxHeight: 300, overflow: "auto" }}>
-            {routeModal.routes || '(empty)'}
-          </pre>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
-            <Btn small ghost onClick={() => showRouteTable({ id: routeModal.nsId, name: routeModal.nsName })}>🔄 更新</Btn>
-            <Btn small ghost onClick={() => setRouteModal(null)}>閉じる</Btn>
-          </div>
-        </Modal>
+        <RouteModal routeModal={routeModal} setRouteModal={setRouteModal} showRouteTable={showRouteTable} />
       )}
 
       {macTableModal && (() => {
@@ -1847,218 +1246,21 @@ export default function NetnsVisualizer() {
       )}
 
       {iptablesModal && (
-        <Modal title={`iptables: ${iptablesModal.nsName}`} onClose={() => setIptablesModal(null)} width={600}>
-          {/* ルール一覧 */}
-          <div style={{ maxHeight: 250, overflow: 'auto', marginBottom: 12 }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>
-              <thead>
-                <tr style={{ borderBottom: `1px solid ${COLORS.border}` }}>
-                  <th style={{ textAlign: 'left', padding: '6px 8px', color: COLORS.textMuted }}>Table</th>
-                  <th style={{ textAlign: 'left', padding: '6px 8px', color: COLORS.textMuted }}>Chain</th>
-                  <th style={{ textAlign: 'left', padding: '6px 8px', color: COLORS.textMuted }}>Target</th>
-                  <th style={{ textAlign: 'left', padding: '6px 8px', color: COLORS.textMuted }}>Extra</th>
-                  <th style={{ width: 40 }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {(iptablesMap[iptablesModal.nsId] || []).map(rule => (
-                  <tr key={rule.id} style={{ borderBottom: `1px solid ${COLORS.border}22` }}>
-                    <td style={{ padding: '6px 8px', color: COLORS.text }}>{rule.table}</td>
-                    <td style={{ padding: '6px 8px', color: COLORS.text }}>{rule.chain}</td>
-                    <td style={{ padding: '6px 8px', color: iptablesModal.nsColor }}>{rule.target}</td>
-                    <td style={{ padding: '6px 8px', color: COLORS.textDim, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{rule.extra || '-'}</td>
-                    <td>
-                      <Btn small color={COLORS.red} onClick={() => deleteIptablesRule(iptablesModal.nsId, iptablesModal.nsName, rule.id, rule)}
-                        style={{ padding: '2px 6px', fontSize: 10 }}>✕</Btn>
-                    </td>
-                  </tr>
-                ))}
-                {!(iptablesMap[iptablesModal.nsId] || []).length && (
-                  <tr><td colSpan={5} style={{ padding: '12px 8px', color: COLORS.textDim, textAlign: 'center' }}>ルールなし</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* ルール追加フォーム */}
-          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', padding: '12px 0', borderTop: `1px solid ${COLORS.border}` }}>
-            <div>
-              <label style={{ fontSize: 10, color: COLORS.textMuted, display: 'block', marginBottom: 2 }}>Table</label>
-              <select value={iptablesModal.newRule.table} onChange={e => {
-                const t = e.target.value;
-                setIptablesModal(prev => ({ ...prev, newRule: { ...prev.newRule, table: t, chain: CHAIN_OPTIONS[t][0] } }));
-              }} style={{ background: COLORS.bg, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 4, padding: '4px 8px', fontSize: 12 }}>
-                {['filter', 'nat', 'mangle', 'raw'].map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: 10, color: COLORS.textMuted, display: 'block', marginBottom: 2 }}>Chain</label>
-              <select value={iptablesModal.newRule.chain} onChange={e => setIptablesModal(prev => ({ ...prev, newRule: { ...prev.newRule, chain: e.target.value } }))}
-                style={{ background: COLORS.bg, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 4, padding: '4px 8px', fontSize: 12 }}>
-                {(CHAIN_OPTIONS[iptablesModal.newRule.table] || []).map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: 10, color: COLORS.textMuted, display: 'block', marginBottom: 2 }}>Target</label>
-              <select value={iptablesModal.newRule.target} onChange={e => setIptablesModal(prev => ({ ...prev, newRule: { ...prev.newRule, target: e.target.value } }))}
-                style={{ background: COLORS.bg, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 4, padding: '4px 8px', fontSize: 12 }}>
-                {['ACCEPT', 'DROP', 'REJECT', 'MASQUERADE', 'SNAT', 'DNAT', 'LOG'].map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
-            <div style={{ flex: 1, minWidth: 150 }}>
-              <label style={{ fontSize: 10, color: COLORS.textMuted, display: 'block', marginBottom: 2 }}>Extra (match条件)</label>
-              <input value={iptablesModal.newRule.extra} onChange={e => setIptablesModal(prev => ({ ...prev, newRule: { ...prev.newRule, extra: e.target.value } }))}
-                placeholder="-s 10.0.0.0/24 -p tcp --dport 80"
-                style={{ width: '100%', background: COLORS.bg, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 4, padding: '4px 8px', fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }} />
-            </div>
-            <Btn small onClick={() => addIptablesRule(iptablesModal.nsId, iptablesModal.nsName)}>追加</Btn>
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-            <Btn small ghost onClick={() => setIptablesModal(null)}>閉じる</Btn>
-          </div>
-        </Modal>
+        <IptablesModal iptablesModal={iptablesModal} setIptablesModal={setIptablesModal} iptablesMap={iptablesMap} deleteIptablesRule={deleteIptablesRule} addIptablesRule={addIptablesRule} />
       )}
 
       {ifaceModal && (
-        <Modal title={`インターフェース設定: ${ifaceModal.ifaceName}`} onClose={() => setIfaceModal(null)} width={420}>
-          <div style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 12, fontFamily: "'JetBrains Mono', monospace", display: "flex", alignItems: "center", gap: 8 }}>
-            <span>現在のIP: <span style={{ color: COLORS.text }}>{ifaceModal.currentIp || '(未設定)'}</span></span>
-            {ifaceModal.currentIp && <Btn small color={COLORS.red} onClick={deleteIfaceIp} style={{ padding: "2px 8px", fontSize: 10 }}>削除</Btn>}
-          </div>
-          <Input label="新しいIPアドレス (CIDR)" value={ifaceModal.newIp} onChange={v => setIfaceModal({...ifaceModal, newIp: v})} mono placeholder="192.168.1.1/24" />
-          <div style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 12, fontFamily: "'JetBrains Mono', monospace" }}>
-            現在のMAC: <span style={{ color: COLORS.text }}>{ifaceModal.currentMac || '(未取得)'}</span>
-          </div>
-          <Input label="新しいMACアドレス" value={ifaceModal.newMac} onChange={v => setIfaceModal({...ifaceModal, newMac: v})} mono placeholder="aa:bb:cc:dd:ee:ff" />
-          <div style={{ fontSize: 10, color: COLORS.textDim, marginBottom: 12 }}>※ MAC変更時はインターフェースを一時的にdownします</div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <Btn ghost small onClick={() => setIfaceModal(null)}>キャンセル</Btn>
-            <Btn small color={COLORS.orange} onClick={changeIface} disabled={!ifaceModal.newIp && !ifaceModal.newMac}>変更</Btn>
-          </div>
-        </Modal>
+        <IfaceModal ifaceModal={ifaceModal} setIfaceModal={setIfaceModal} deleteIfaceIp={deleteIfaceIp} changeIface={changeIface} />
       )}
 
       {/* ── Bridge VLAN Modal ── */}
       {bridgeVlanModal && (
-        <Modal title={`VLAN設定: ${bridgeVlanModal.dev} (${bridgeVlanModal.bridgeName})`} onClose={() => setBridgeVlanModal(null)} width={480}>
-          <div style={{ marginBottom: 16 }}>
-            <span style={{ display: "block", fontSize: 11, color: COLORS.textMuted, marginBottom: 8, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.05em", textTransform: "uppercase" }}>ポートモード</span>
-            <div style={{ display: "flex", gap: 12 }}>
-              {['access', 'trunk', 'custom'].map(mode => (
-                <label key={mode} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 12, color: bridgeVlanModal.portMode === mode ? COLORS.cyan : COLORS.textMuted, fontFamily: "'JetBrains Mono', monospace" }}>
-                  <input type="radio" name="portMode" checked={bridgeVlanModal.portMode === mode}
-                    onChange={() => setBridgeVlanModal({...bridgeVlanModal, portMode: mode})}
-                    style={{ accentColor: COLORS.cyan }} />
-                  {mode === 'access' ? 'Access' : mode === 'trunk' ? 'Trunk' : 'Custom'}
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {bridgeVlanModal.portMode === 'access' && (
-            <Input label="VLAN ID" value={bridgeVlanModal.accessVid}
-              onChange={v => setBridgeVlanModal({...bridgeVlanModal, accessVid: v})} mono placeholder="100" />
-          )}
-
-          {bridgeVlanModal.portMode === 'trunk' && (<>
-            <Input label="VLAN IDs (カンマ区切り)" value={bridgeVlanModal.trunkVids}
-              onChange={v => setBridgeVlanModal({...bridgeVlanModal, trunkVids: v})} mono placeholder="10,20,30" />
-            <Input label="ネイティブVLAN (任意)" value={bridgeVlanModal.trunkNativeVid}
-              onChange={v => setBridgeVlanModal({...bridgeVlanModal, trunkNativeVid: v})} mono placeholder="10" />
-            <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: COLORS.textMuted, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
-                <input type="checkbox" checked={bridgeVlanModal.removeDefaultVlan}
-                  onChange={e => setBridgeVlanModal({...bridgeVlanModal, removeDefaultVlan: e.target.checked})} />
-                デフォルトVLAN(1)を除去
-              </label>
-              <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: COLORS.textMuted, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
-                <input type="checkbox" checked={bridgeVlanModal.applySelf}
-                  onChange={e => setBridgeVlanModal({...bridgeVlanModal, applySelf: e.target.checked})} />
-                ブリッジ自体(self)にも設定
-              </label>
-            </div>
-          </>)}
-
-          {bridgeVlanModal.portMode === 'custom' && (<>
-            <Input label="VID" value={bridgeVlanModal.newVid}
-              onChange={v => setBridgeVlanModal({...bridgeVlanModal, newVid: v})} mono placeholder="100" />
-            <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: COLORS.textMuted, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
-                <input type="checkbox" checked={bridgeVlanModal.newPvid}
-                  onChange={e => setBridgeVlanModal({...bridgeVlanModal, newPvid: e.target.checked})} />
-                PVID
-              </label>
-              <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: COLORS.textMuted, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
-                <input type="checkbox" checked={bridgeVlanModal.newUntagged}
-                  onChange={e => setBridgeVlanModal({...bridgeVlanModal, newUntagged: e.target.checked})} />
-                Untagged
-              </label>
-            </div>
-          </>)}
-
-          {/* Current VLAN entries */}
-          {(() => {
-            const existing = bridgeVlans.filter(bv => bv.bridgeId === bridgeVlanModal.bridgeId && bv.dev === bridgeVlanModal.dev);
-            if (!existing.length) return null;
-            return (
-              <div style={{ marginBottom: 12 }}>
-                <span style={{ display: "block", fontSize: 11, color: COLORS.textMuted, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.05em", textTransform: "uppercase" }}>現在の設定</span>
-                {existing.map(bv => (
-                  <div key={bv.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", background: COLORS.bg, borderRadius: 4, marginBottom: 4, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
-                    <span style={{ color: COLORS.text }}>VID {bv.vid}</span>
-                    {bv.pvid && <span style={{ color: COLORS.cyan, fontSize: 9, background: COLORS.cyan+"20", padding: "1px 4px", borderRadius: 3 }}>PVID</span>}
-                    {bv.untagged && <span style={{ color: COLORS.green, fontSize: 9, background: COLORS.green+"20", padding: "1px 4px", borderRadius: 3 }}>Untag</span>}
-                    <span style={{ flex: 1 }} />
-                    <span onClick={() => deleteBridgeVlan(bv.id)} style={{ color: COLORS.red, cursor: "pointer", fontSize: 10 }}>✕</span>
-                  </div>
-                ))}
-              </div>
-            );
-          })()}
-
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <Btn ghost small onClick={() => setBridgeVlanModal(null)}>閉じる</Btn>
-            <Btn small color={COLORS.cyan} onClick={applyPortMode}>設定</Btn>
-          </div>
-        </Modal>
+        <BridgeVlanModal bridgeVlanModal={bridgeVlanModal} setBridgeVlanModal={setBridgeVlanModal} bridgeVlans={bridgeVlans} deleteBridgeVlan={deleteBridgeVlan} applyPortMode={applyPortMode} />
       )}
 
       {/* ── Endpoint VLAN Modal ── */}
       {vlanModal && (
-        <Modal title={`VLAN サブインターフェース: ${vlanModal.ifaceName}`} onClose={() => setVlanModal(null)} width={420}>
-          <Input label="VLAN ID (1-4094)" value={vlanModal.vlanId}
-            onChange={v => setVlanModal({...vlanModal, vlanId: v})} mono placeholder="100" />
-          <Input label="IPアドレス (任意)" value={vlanModal.ip}
-            onChange={v => setVlanModal({...vlanModal, ip: v})} mono placeholder="10.0.100.1/24" />
-          <label style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12, fontSize: 11, color: COLORS.textMuted, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
-            <input type="checkbox" checked={vlanModal.removeParentIp}
-              onChange={e => setVlanModal({...vlanModal, removeParentIp: e.target.checked})} />
-            親インターフェースのIPを削除
-          </label>
-
-          {/* Existing VLANs */}
-          {(() => {
-            const existing = vlans.filter(vl => vl.parentId === vlanModal.vethId && vl.parentEnd === vlanModal.end);
-            if (!existing.length) return null;
-            return (
-              <div style={{ marginBottom: 12 }}>
-                <span style={{ display: "block", fontSize: 11, color: COLORS.textMuted, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace" }}>既存のVLAN</span>
-                {existing.map(vl => (
-                  <div key={vl.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", background: COLORS.bg, borderRadius: 4, marginBottom: 4, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
-                    <span style={{ color: COLORS.cyan }}>🏷 {vl.name}</span>
-                    {vl.ip && <span style={{ color: COLORS.textDim }}>{vl.ip}</span>}
-                  </div>
-                ))}
-              </div>
-            );
-          })()}
-
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <Btn ghost small onClick={() => setVlanModal(null)}>キャンセル</Btn>
-            <Btn small color={COLORS.orange} onClick={confirmVlan}>追加</Btn>
-          </div>
-        </Modal>
+        <VlanModal vlanModal={vlanModal} setVlanModal={setVlanModal} vlans={vlans} confirmVlan={confirmVlan} />
       )}
 
       {showCmd && (

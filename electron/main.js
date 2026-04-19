@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, powerMonitor } from 'electron'
 import path from 'path'
 import fs from 'fs/promises'
+import process from 'node:process'
 import { fileURLToPath } from 'url'
 import { startContainer, stopContainer, execInContainer, openShell, sendCommand, closeShell, killSession, writeSession, closeAllShells, reconnectContainer } from './docker-manager.js'
 

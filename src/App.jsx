@@ -5,29 +5,8 @@ import { CHAIN_OPTIONS } from "./logic/constants.js";
 import { CIDR_RE, validateCidr, CIDR_ERROR_MSG } from "./logic/validation.js";
 import { getNsHeight, getInterfacePositions } from "./logic/topology.js";
 import { enrichBridgeVlans } from "./logic/enrich.js";
+import { defaultState, loadGuiState, saveGuiState, GUI_STATE_KEY } from "./logic/state.js";
 import { saveFile, loadFile } from "./ipc/file.js";
-const defaultState = () => ({ namespaces: [], bridges: [], veths: [], vlans: [], bridgeVlans: [], routes: [], commands: [] });
-const GUI_STATE_KEY = "netns-viz:gui-state:v1";
-
-const loadGuiState = () => {
-  if (typeof window === "undefined") return defaultState();
-  try {
-    const raw = window.sessionStorage.getItem(GUI_STATE_KEY);
-    if (!raw) return defaultState();
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return defaultState();
-    if (!Array.isArray(parsed.namespaces) || !Array.isArray(parsed.bridges) || !Array.isArray(parsed.veths) || !Array.isArray(parsed.routes)) {
-      return defaultState();
-    }
-    if (!Array.isArray(parsed.commands)) parsed.commands = [];
-    if (!Array.isArray(parsed.vlans)) parsed.vlans = [];
-    if (!Array.isArray(parsed.bridgeVlans)) parsed.bridgeVlans = [];
-    enrichBridgeVlans(parsed.bridgeVlans, parsed.veths, parsed.bridges);
-    return parsed;
-  } catch {
-    return defaultState();
-  }
-};
 
 const Icon = ({ d, size = 16, color = COLORS.textMuted }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>
@@ -459,9 +438,7 @@ export default function NetnsVisualizer() {
   const addExecLog = useCallback((cmd, output, ok = true) => setExecLog(prev => [...prev, { cmd, output, success: ok, time: new Date().toLocaleTimeString() }]), []);
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [execLog]);
   useEffect(() => {
-    try {
-      window.sessionStorage.setItem(GUI_STATE_KEY, JSON.stringify(state));
-    } catch { /* ignore */ }
+    saveGuiState(state);
   }, [state]);
 
   /* ── Docker ── */

@@ -93,6 +93,7 @@ export function buildRailView(state) {
     namespaces: nsView,
     bridges,
     veths,
+    bridgeVlans,
     links: linksView,
     vlanIds,
     switches: nsView.filter(n => n.role === 'switch'),

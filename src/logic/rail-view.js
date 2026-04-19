@@ -101,3 +101,142 @@ export function buildRailView(state) {
     nsById,
   };
 }
+
+// Phase B layout constants (Rail 基準)
+const NS_W = 200;
+const NS_H_SWITCH = 110;
+const NS_H_HOST = 94;
+const Y_SWITCH = 120;
+const Y_HOST = 420;
+const TERRITORY_RX_MIN = 200;
+const TERRITORY_RY_MIN = 200;
+
+// autoLayout: x/y 未定義 ns のみ座標を算出。x=0 は有効座標として保全。
+// 発動: 初回レンダ時 + 新規 ns 追加時（呼び出し側が制御）。
+// 戻り値: { [nsId]: { x, y } } — 未定義 ns のみを含む
+export function autoLayout(namespaces, width = 1200, height = 800) {
+  void height;
+  const result = {};
+  const list = namespaces || [];
+  const switches = list.filter(n => n.role === 'switch');
+  const hosts = list.filter(n => n.role !== 'switch');
+
+  const swCount = Math.max(1, switches.length);
+  switches.forEach((sw, i) => {
+    if (sw.x == null || sw.y == null) {
+      const x = (i + 0.5) * (width / swCount) - NS_W / 2;
+      result[sw.id] = { x, y: Y_SWITCH };
+    }
+  });
+
+  const hostCount = Math.max(1, hosts.length);
+  hosts.forEach((h, i) => {
+    if (h.x == null || h.y == null) {
+      const x = (i + 0.5) * (width / hostCount) - NS_W / 2;
+      result[h.id] = { x, y: Y_HOST };
+    }
+  });
+
+  return result;
+}
+
+// computeVlanTerritories: VLAN ごとに所属 host ns の座標から外接楕円を計算
+// 戻り値: [{ vid, cx, cy, rx, ry, cidr }] — rx/ry ≧ 200 を保証
+export function computeVlanTerritories(railView) {
+  const links = railView?.links || [];
+  const nsById = railView?.nsById || {};
+  const byVid = new Map();
+
+  for (const l of links) {
+    if (l.kind !== 'access' || l.vlan == null) continue;
+    const vid = l.vlan;
+    for (const end of [l.a, l.b]) {
+      const ns = nsById[end.nsId];
+      if (!ns || ns.role !== 'host') continue;
+      if (ns.x == null || ns.y == null) continue;
+      const cx = ns.x + NS_W / 2;
+      const cy = ns.y + NS_H_HOST / 2;
+      if (!byVid.has(vid)) byVid.set(vid, []);
+      byVid.get(vid).push({ cx, cy, ns });
+    }
+  }
+
+  const territories = [];
+  for (const [vid, points] of byVid) {
+    if (points.length === 0) continue;
+    const xs = points.map(p => p.cx);
+    const ys = points.map(p => p.cy);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const rx = Math.max(TERRITORY_RX_MIN, (maxX - minX) / 2 + 80);
+    const ry = Math.max(TERRITORY_RY_MIN, (maxY - minY) / 2 + 60);
+
+    // CIDR 簡易集約: 同 VLAN ホストの IP 共通プレフィクス + /24 固定
+    const ips = points
+      .map(p => p.ns)
+      .flatMap(ns => {
+        const hits = [];
+        for (const v of railView?.veths || []) {
+          for (const end of ['endA', 'endB']) {
+            if (v[end].nsId === ns.id && v[end].ip) hits.push(v[end].ip);
+          }
+        }
+        return hits;
+      })
+      .map(ip => ip.split('/')[0])
+      .filter(Boolean);
+    let cidr = null;
+    if (ips.length > 0) {
+      const first = ips[0].split('.');
+      cidr = `${first[0]}.${first[1]}.${first[2]}.0/24`;
+    }
+
+    territories.push({ vid, cx, cy, rx, ry, cidr });
+  }
+
+  territories.sort((a, b) => a.vid - b.vid);
+  return territories;
+}
+
+// buildLinkGeometry: veth link のベジェ d 属性とメタ情報を生成
+// 戻り値: [{ id, kind, vid, vids, a:{x,y}, b:{x,y}, d, strokeDasharray }]
+export function buildLinkGeometry(railView) {
+  const links = railView?.links || [];
+  const nsById = railView?.nsById || {};
+  const out = [];
+
+  for (const l of links) {
+    const nsA = nsById[l.a.nsId];
+    const nsB = nsById[l.b.nsId];
+    if (!nsA || !nsB) continue;
+    if (nsA.x == null || nsA.y == null || nsB.x == null || nsB.y == null) continue;
+    const hA = nsA.role === 'switch' ? NS_H_SWITCH : NS_H_HOST;
+    const hB = nsB.role === 'switch' ? NS_H_SWITCH : NS_H_HOST;
+    const ax = nsA.x + NS_W / 2;
+    const ay = nsA.y + hA / 2;
+    const bx = nsB.x + NS_W / 2;
+    const by = nsB.y + hB / 2;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const d = Math.abs(dx) > Math.abs(dy)
+      ? `M ${ax},${ay} C ${ax + dx * 0.4},${ay} ${bx - dx * 0.4},${by} ${bx},${by}`
+      : `M ${ax},${ay} C ${ax},${ay + dy * 0.45} ${bx},${by - dy * 0.45} ${bx},${by}`;
+
+    out.push({
+      id: l.id,
+      kind: l.kind,
+      vid: l.vlan ?? null,
+      vids: l.vlans ?? null,
+      a: { x: ax, y: ay },
+      b: { x: bx, y: by },
+      d,
+      strokeDasharray: l.kind === 'trunk' ? '5 4' : null,
+    });
+  }
+
+  return out;
+}

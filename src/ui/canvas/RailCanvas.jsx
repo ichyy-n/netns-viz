@@ -92,15 +92,15 @@ export default function RailCanvas({
   const isNodeDim = (id) =>
     selectedId != null && selectedId !== id && !isAdjacent(selectedId, id);
 
-  const isLinkHighlighted = (l) => {
-    const focus = selectedId || hoverId;
-    return focus != null && (l.a.nsId === focus || l.b.nsId === focus);
-  };
+  const linksById = useMemo(() => {
+    const m = {};
+    for (const l of links) m[l.id] = l;
+    return m;
+  }, [links]);
 
-  const isLinkDim = (l) =>
-    selectedId != null &&
-    l.a.nsId !== selectedId &&
-    l.b.nsId !== selectedId;
+  const isLinkHot = (l) =>
+    (selectedId != null && (l.a.nsId === selectedId || l.b.nsId === selectedId)) ||
+    (hoverId != null && (l.a.nsId === hoverId || l.b.nsId === hoverId));
 
   const handleNodeMouseDown = (e, ns) => {
     if (e.button !== 0) return;
@@ -259,19 +259,28 @@ export default function RailCanvas({
         <rect width={VIEWBOX_W} height={VIEWBOX_H} fill="url(#dot-grid)" />
         <rect width={VIEWBOX_W} height={VIEWBOX_H} fill="url(#canvas-spot)" />
         <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
-          {geometry.map((g) => (
-            <LinkPath
-              key={g.id}
-              d={g.d}
-              kind={g.kind}
-              vid={g.vid}
-              vids={g.vids}
-              pa={g.a}
-              pb={g.b}
-              highlighted={isLinkHighlighted(g)}
-              dim={isLinkDim(g)}
-            />
-          ))}
+          {geometry.map((g) => {
+            const l = linksById[g.id];
+            if (!l) return null;
+            const hot = isLinkHot(l);
+            return (
+              <g
+                key={g.id}
+                opacity={selectedId && !hot ? 0.3 : 1}
+                style={{ transition: 'opacity 0.15s' }}
+              >
+                <LinkPath
+                  d={g.d}
+                  kind={g.kind}
+                  vid={g.vid}
+                  vids={g.vids}
+                  pa={g.a}
+                  pb={g.b}
+                  highlighted={hot}
+                />
+              </g>
+            );
+          })}
           {namespaces.map((ns) => {
             const pos = getNsPos(ns);
             return (

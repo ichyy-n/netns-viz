@@ -16,19 +16,17 @@ export default function LinkPath({
   pb = null,
   dashed = false,
   highlighted = false,
-  dim = false,
   strokeWidth,
 }) {
   const stroke = pickStroke(kind, vid);
   const width = strokeWidth ?? (highlighted ? 2.5 : 1.6);
-  const opacity = dim ? 0.3 : highlighted ? 1 : 0.85;
   const dasharray = dashed || kind === 'trunk' ? '5 4' : undefined;
   const showTrunkLabel = kind === 'trunk' && pa && pb;
   const trunkLabel = vids && vids.length > 0 ? `TRUNK ${vids.join(',')}` : 'TRUNK 10,20';
   const mx = showTrunkLabel ? (pa.x + pb.x) / 2 : 0;
   const my = showTrunkLabel ? (pa.y + pb.y) / 2 : 0;
   return (
-    <g opacity={opacity} style={{ transition: 'opacity 0.15s' }}>
+    <g>
       <path
         d={d}
         fill="none"
@@ -50,7 +48,7 @@ export default function LinkPath({
             fill={TOKENS.bg}
             stroke={TOKENS.trunk}
             strokeWidth={0.75}
-            strokeOpacity={0.5}
+            strokeOpacity={highlighted ? 1 : 0.5}
           />
           <text
             x={0}

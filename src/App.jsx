@@ -22,6 +22,7 @@ import { IptablesModal } from "./ui/modals/IptablesModal.jsx";
 import { HostTerminal } from "./ui/terminal/HostTerminal.jsx";
 import { NsTerminal } from "./ui/terminal/NsTerminal.jsx";
 import { BridgePort } from "./ui/canvas/BridgePort.jsx";
+import { VethEdge } from "./ui/canvas/VethEdge.jsx";
 
 const isElectron = () => Boolean(window.electronAPI);
 
@@ -996,12 +997,8 @@ export default function NetnsVisualizer() {
                   const cp1x = pA.side === "right" ? pA.x+80 : pA.x-80;
                   const cp2x = pB.side === "left" ? pB.x-80 : pB.x+80;
                   return (
-                    <g key={v.id} onContextMenu={e => { e.preventDefault(); setVethCtxMenu({ vethId: v.id, x: e.clientX, y: e.clientY }); }}>
-                      <path d={`M${pA.x},${pA.y} C${cp1x},${pA.y} ${cp2x},${pB.y} ${pB.x},${pB.y}`} stroke={COLORS.orange} strokeWidth={2} fill="none" strokeDasharray="6 4" opacity={0.6} />
-                      <path d={`M${pA.x},${pA.y} C${cp1x},${pA.y} ${cp2x},${pB.y} ${pB.x},${pB.y}`} stroke="transparent" strokeWidth={12} fill="none" />
-                      <circle cx={pA.x} cy={pA.y} r={4} fill={COLORS.orange} /><circle cx={pB.x} cy={pB.y} r={4} fill={COLORS.orange} />
-                      <text x={(pA.x+pB.x)/2} y={Math.min(pA.y,pB.y)-10} textAnchor="middle" fontSize={9} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace">{v.name}</text>
-                    </g>);
+                    <VethEdge key={v.id} v={v} pA={pA} pB={pB} cp1x={cp1x} cp2x={cp2x} setVethCtxMenu={setVethCtxMenu} />
+                  );
                 })}
 
                 {/* Namespace boxes */}

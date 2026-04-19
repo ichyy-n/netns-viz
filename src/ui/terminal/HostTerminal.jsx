@@ -21,6 +21,7 @@ export const HostTerminal = ({ tabId, dockerReady, isElectron, openShell, closeS
     openShell(sid, 'bash');
     setShellReady(true);
     return () => { closeShell(sid); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dockerReady]);
 
   // ストリームデータ受信
@@ -52,6 +53,7 @@ export const HostTerminal = ({ tabId, dockerReady, isElectron, openShell, closeS
       }
     });
     return cleanup;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const runCmd = async () => {

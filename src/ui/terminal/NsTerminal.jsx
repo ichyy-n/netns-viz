@@ -22,6 +22,7 @@ export const NsTerminal = ({ tabId, ns, dockerReady, isElectron, openShell, clos
     openShell(sid, shellCmd);
     setShellReady(true);
     return () => { closeShell(sid); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dockerReady, ns.name]);
 
   // ストリームデータ受信
@@ -53,6 +54,7 @@ export const NsTerminal = ({ tabId, ns, dockerReady, isElectron, openShell, clos
       }
     });
     return cleanup;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const runCmd = async () => {

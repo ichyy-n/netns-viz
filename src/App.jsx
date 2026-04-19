@@ -71,6 +71,13 @@ export default function NetnsVisualizer() {
   const [iptablesMap, setIptablesMap] = useState({});
   const [iptablesModal, setIptablesModal] = useState(null);
   const update = useCallback((fn) => setState(prev => { const n = JSON.parse(JSON.stringify(prev)); fn(n); return n; }), []);
+  // eslint-disable-next-line no-unused-vars
+  const onDragEnd = useCallback((nsId, x, y) => {
+    update((s) => {
+      const ns = s.namespaces.find((n) => n.id === nsId);
+      if (ns) { ns.x = x; ns.y = y; }
+    });
+  }, [update]);
   const swapVethEnds = useCallback((vethId) => {
     update(s => {
       const v = s.veths.find(vv => vv.id === vethId);

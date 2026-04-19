@@ -23,6 +23,9 @@ import { NsTerminal } from "./ui/terminal/NsTerminal.jsx";
 import { VethEdge } from "./ui/canvas/VethEdge.jsx";
 import { NamespaceNode } from "./ui/canvas/NamespaceNode.jsx";
 import { Canvas } from "./ui/canvas/Canvas.jsx";
+import { RailShell } from "./ui/shell/RailShell.jsx";
+import { CommandPalette } from "./ui/shell/CommandPalette.jsx";
+import { buildRailView } from "./logic/rail-view.js";
 
 const isElectron = () => Boolean(window.electronAPI);
 
@@ -57,6 +60,9 @@ export default function NetnsVisualizer() {
   const [vlanModal, setVlanModal] = useState(null);
   const [bridgeVlanModal, setBridgeVlanModal] = useState(null);
   const [vethCtxMenu, setVethCtxMenu] = useState(null);
+  const [view, setView] = useState('canvas');
+  const [hoverId, setHoverId] = useState(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const logEndRef = useRef(null);
 
   const { namespaces, bridges, veths, vlans, bridgeVlans, routes, commands } = state;
@@ -932,183 +938,164 @@ export default function NetnsVisualizer() {
   const ifacePos = getInterfacePositions(namespaces, bridges, veths, vlans);
   const nsOptions = namespaces.map(n => ({ value: n.id, label: n.name }));
   const bridgeOptions = nsId => [{ value: "", label: "(none)" }, ...bridges.filter(b => b.nsId === nsId).map(b => ({ value: b.id, label: b.name }))];
+  const railView = buildRailView(state);
+
+  useEffect(() => {
+    const h = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setPaletteOpen(o => !o);
+      }
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, []);
+
+  const canvasSlot = (
+    <Canvas svgRef={svgRef} panning={panning} onMouseDown={e => { setVethCtxMenu(null); onBgMouseDown(e); }} onWheel={onWheel} zoom={zoom} pan={pan}>
+      {veths.map(v => {
+        const pA = ifacePos[v.endA.id], pB = ifacePos[v.endB.id];
+        if (!pA || !pB) return null;
+        const cp1x = pA.side === "right" ? pA.x+80 : pA.x-80;
+        const cp2x = pB.side === "left" ? pB.x-80 : pB.x+80;
+        return (
+          <VethEdge key={v.id} v={v} pA={pA} pB={pB} cp1x={cp1x} cp2x={cp2x} setVethCtxMenu={setVethCtxMenu} />
+        );
+      })}
+      {namespaces.map(ns => (
+        <NamespaceNode
+          key={ns.id}
+          ns={ns}
+          selected={selected}
+          onMouseDown={onMouseDown}
+          setSelected={setSelected}
+          dockerReady={dockerReady}
+          bridges={bridges}
+          veths={veths}
+          vlans={vlans}
+          namespaces={namespaces}
+          bridgeVlans={bridgeVlans}
+          ipForwardMap={ipForwardMap}
+          iptablesMap={iptablesMap}
+          showVlanSubIface={showVlanSubIface}
+          showMacTable={showMacTable}
+          showArpTable={showArpTable}
+          showRouteTable={showRouteTable}
+          toggleIpForward={toggleIpForward}
+          showIptables={showIptables}
+          openTerminal={openTerminal}
+          deleteNs={deleteNs}
+          toggleBridgeVlanFiltering={toggleBridgeVlanFiltering}
+          deleteBridge={deleteBridge}
+          openIfaceModal={openIfaceModal}
+          openBridgeVlanModal={openBridgeVlanModal}
+          openVlanModal={openVlanModal}
+          deleteVeth={deleteVeth}
+          deleteVlan={deleteVlan}
+        />
+      ))}
+      {!namespaces.length && (
+        <text x={300} y={200} textAnchor="middle" fontSize={14} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace">
+          {dockerReady ? "「+ Namespace」で始めましょう" : isElectron() ? "まず「🐳 Docker起動」をクリック" : "Electronで起動するとDockerと連携できます"}
+        </text>
+      )}
+    </Canvas>
+  );
+
+  const terminalPanel = showTerminal && terminalTabs.length > 0 ? (
+    <div style={{ height: 260, borderTop: `1px solid ${COLORS.border}`, background: COLORS.bg, display: "flex", flexDirection: "column", flexShrink: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 0, borderBottom: `1px solid ${COLORS.border}`, background: COLORS.surface, flexShrink: 0, overflow: "auto" }}>
+        {terminalTabs.map(tab => (
+          <div key={tab.tabId} onClick={() => setActiveTermTab(tab.tabId)}
+            style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
+              cursor: "pointer", fontWeight: 600, color: activeTermTab === tab.tabId ? tab.color : COLORS.textDim,
+              background: activeTermTab === tab.tabId ? COLORS.bg : "transparent",
+              borderBottom: activeTermTab === tab.tabId ? `2px solid ${tab.color}` : "2px solid transparent",
+              whiteSpace: "nowrap", flexShrink: 0 }}>
+            <span style={{ width: 6, height: 6, borderRadius: 3, background: tab.color, display: "inline-block" }} />
+            {tab.label}
+            <span onClick={e => { e.stopPropagation(); closeTermTab(tab.tabId); }} style={{ color: COLORS.textDim, fontSize: 10, marginLeft: 4, cursor: "pointer" }}>✕</span>
+          </div>
+        ))}
+        <div style={{ flex: 1 }} />
+        <Btn small ghost onClick={() => setShowTerminal(false)} style={{ marginRight: 8 }}><Icon d={Icons.x} size={10} color={COLORS.textMuted} /></Btn>
+      </div>
+      <div style={{ flex: 1, overflow: "hidden" }}>
+        {terminalTabs.map(tab => (
+          <div key={tab.tabId} style={{ display: activeTermTab === tab.tabId ? "flex" : "none", height: "100%", flexDirection: "column" }}>
+            {tab.kind === 'host'
+              ? <HostTerminal tabId={tab.tabId} dockerReady={dockerReady} isElectron={isElectron} openShell={openShell} closeShell={closeShell} sendCommand={sendCommand} killSession={killSession} writeSession={writeSession} onShellData={onShellData} />
+              : <NsTerminal tabId={tab.tabId} ns={{ id: tab.nsId, name: tab.nsName, color: tab.color }} dockerReady={dockerReady} isElectron={isElectron} openShell={openShell} closeShell={closeShell} sendCommand={sendCommand} killSession={killSession} writeSession={writeSession} onShellData={onShellData} />}
+          </div>
+        ))}
+      </div>
+    </div>
+  ) : null;
 
   /* ══════════════════════════════════════════════
      RENDER
      ══════════════════════════════════════════════ */
   return (
-    <div style={{ width: "100vw", height: "100vh", background: COLORS.bg, display: "flex", flexDirection: "column", fontFamily: "'Segoe UI', system-ui, sans-serif", color: COLORS.text, overflow: "hidden" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:${COLORS.bg}}::-webkit-scrollbar-thumb{background:${COLORS.border};border-radius:3px}`}</style>
+    <>
+      <RailShell
+        projectName={namespaces.length ? `namespaces · ${namespaces.length}` : 'workspace'}
+        dockerReady={dockerReady}
+        dockerLoading={dockerLoading}
+        onStartDocker={isElectron() ? startDocker : undefined}
+        onOpenHostTerminal={isElectron() && dockerReady ? openHostTerminal : undefined}
+        onApply={namespaces.length ? generateCommands : undefined}
+        onSave={isElectron() && namespaces.length ? saveTopology : undefined}
+        onLoad={isElectron() ? loadTopology : undefined}
+        applyCount={0}
+        view={view}
+        onViewChange={setView}
+        onAddNs={!isElectron() || dockerReady ? addNs : undefined}
+        onAddBridge={namespaces.length ? addBridge : undefined}
+        onAddVeth={namespaces.length ? addVeth : undefined}
+        onAddVlan={undefined}
+        onPaletteOpen={() => setPaletteOpen(true)}
+        onSettings={undefined}
+        railView={railView}
+        selectedId={selected}
+        onSelect={setSelected}
+        hoverId={hoverId}
+        onHover={setHoverId}
+        execLog={execLog}
+        showLog={showLog}
+        onToggleLog={setShowLog}
+        onOpenNsTerminal={openTerminal}
+        canvas={canvasSlot}
+        bottomPanel={terminalPanel}
+      />
 
-      {/* ── Top Bar ── */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", borderBottom: `1px solid ${COLORS.border}`, background: COLORS.surface, flexShrink: 0, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ width: 28, height: 28, borderRadius: 6, background: `linear-gradient(135deg, ${COLORS.accent}, ${COLORS.purple})`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Icon d={Icons.network} size={15} color="#fff" />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        railView={railView}
+        onSelect={setSelected}
+        onViewChange={setView}
+        onAddNs={!isElectron() || dockerReady ? addNs : undefined}
+        onAddBridge={namespaces.length ? addBridge : undefined}
+        onAddVeth={namespaces.length ? addVeth : undefined}
+        onAddVlan={undefined}
+        onAddRoute={namespaces.length ? addRoute : undefined}
+        onAddCommand={namespaces.length ? addCommand : undefined}
+        onGenerateCommands={namespaces.length ? generateCommands : undefined}
+        onOpenTerminal={isElectron() && dockerReady ? openHostTerminal : undefined}
+        onReset={resetAll}
+      />
+
+      {vethCtxMenu && (
+        <div style={{ position: "fixed", left: vethCtxMenu.x, top: vethCtxMenu.y, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: 4, zIndex: 9999, boxShadow: "0 4px 12px rgba(0,0,0,0.4)" }}
+          onClick={() => setVethCtxMenu(null)}>
+          <div style={{ padding: "6px 16px", cursor: "pointer", fontSize: 12, color: COLORS.text, fontFamily: "'JetBrains Mono', monospace", borderRadius: 4 }}
+            onMouseEnter={e => e.currentTarget.style.background = COLORS.border}
+            onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+            onClick={() => swapVethEnds(vethCtxMenu.vethId)}>
+            接続線の左右を入れ替え
           </div>
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, fontSize: 14 }}>netns<span style={{ color: COLORS.accent }}>viz</span></span>
         </div>
-        <div style={{ width: 1, height: 20, background: COLORS.border }} />
-
-        {isElectron() && (<>
-          {!dockerReady
-            ? <Btn small onClick={startDocker} disabled={dockerLoading} color={dockerLoading ? COLORS.textDim : COLORS.green}>{dockerLoading ? "⏳ 起動中..." : "🐳 Docker起動"}</Btn>
-            : <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: COLORS.green, fontFamily: "'JetBrains Mono', monospace" }}><span style={{ width: 6, height: 6, borderRadius: 3, background: COLORS.green, display: "inline-block" }} />Docker Ready</div>}
-          <div style={{ width: 1, height: 20, background: COLORS.border }} />
-        </>)}
-
-        <Btn small onClick={addNs} disabled={isElectron() && !dockerReady}><Icon d={Icons.plus} size={12} color="#fff" /> Namespace</Btn>
-        <Btn small onClick={addBridge} color={COLORS.green} disabled={!namespaces.length}><Icon d={Icons.plus} size={12} color="#fff" /> Bridge(L2SW)</Btn>
-        <Btn small onClick={addVeth} color={COLORS.orange} disabled={!namespaces.length}><Icon d={Icons.plus} size={12} color="#fff" /> Veth Pair</Btn>
-        <Btn small onClick={addRoute} color={COLORS.purple} disabled={!namespaces.length}><Icon d={Icons.plus} size={12} color="#fff" /> Route</Btn>
-        <Btn small onClick={addCommand} color={COLORS.cyan} disabled={!namespaces.length}><Icon d={Icons.plus} size={12} color="#fff" /> Command</Btn>
-
-        <div style={{ flex: 1 }} />
-
-        {isElectron() && (<>
-          <Btn small ghost onClick={saveTopology} disabled={!namespaces.length}><Icon d={Icons.save} size={12} color={COLORS.textMuted} /> 保存</Btn>
-          <Btn small ghost onClick={loadTopology}><Icon d={Icons.folder} size={12} color={COLORS.textMuted} /> 読込</Btn>
-        </>)}
-        <Btn small ghost onClick={() => setShowLog(!showLog)}><Icon d={Icons.code} size={12} color={COLORS.textMuted} /> ログ</Btn>
-<Btn small ghost onClick={generateCommands} disabled={!namespaces.length}><Icon d={Icons.terminal} size={12} color={COLORS.textMuted} /> コマンド生成</Btn>
-        {isElectron() && <Btn small ghost onClick={openHostTerminal} disabled={!dockerReady}><Icon d={Icons.terminal} size={12} color={COLORS.textMuted} /> ターミナル(host)</Btn>}
-        <Btn small ghost onClick={resetAll}><Icon d={Icons.x} size={12} color={COLORS.textMuted} /> リセット</Btn>
-        <div style={{ fontSize: 11, color: COLORS.textDim, fontFamily: "'JetBrains Mono', monospace" }}>{Math.round(zoom * 100)}%</div>
-      </div>
-
-      {/* ── Main Area ── */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-
-          {/* ── Canvas ── */}
-          <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
-            <Canvas svgRef={svgRef} panning={panning} onMouseDown={e => { setVethCtxMenu(null); onBgMouseDown(e); }} onWheel={onWheel} zoom={zoom} pan={pan}>
-                {/* Veth lines */}
-                {veths.map(v => {
-                  const pA = ifacePos[v.endA.id], pB = ifacePos[v.endB.id];
-                  if (!pA || !pB) return null;
-                  const cp1x = pA.side === "right" ? pA.x+80 : pA.x-80;
-                  const cp2x = pB.side === "left" ? pB.x-80 : pB.x+80;
-                  return (
-                    <VethEdge key={v.id} v={v} pA={pA} pB={pB} cp1x={cp1x} cp2x={cp2x} setVethCtxMenu={setVethCtxMenu} />
-                  );
-                })}
-
-                {/* Namespace boxes */}
-                {namespaces.map(ns => (
-                  <NamespaceNode
-                    key={ns.id}
-                    ns={ns}
-                    selected={selected}
-                    onMouseDown={onMouseDown}
-                    setSelected={setSelected}
-                    dockerReady={dockerReady}
-                    bridges={bridges}
-                    veths={veths}
-                    vlans={vlans}
-                    namespaces={namespaces}
-                    bridgeVlans={bridgeVlans}
-                    ipForwardMap={ipForwardMap}
-                    iptablesMap={iptablesMap}
-                    showVlanSubIface={showVlanSubIface}
-                    showMacTable={showMacTable}
-                    showArpTable={showArpTable}
-                    showRouteTable={showRouteTable}
-                    toggleIpForward={toggleIpForward}
-                    showIptables={showIptables}
-                    openTerminal={openTerminal}
-                    deleteNs={deleteNs}
-                    toggleBridgeVlanFiltering={toggleBridgeVlanFiltering}
-                    deleteBridge={deleteBridge}
-                    openIfaceModal={openIfaceModal}
-                    openBridgeVlanModal={openBridgeVlanModal}
-                    openVlanModal={openVlanModal}
-                    deleteVeth={deleteVeth}
-                    deleteVlan={deleteVlan}
-                  />
-                ))}
-
-                {!namespaces.length && (
-                  <text x={300} y={200} textAnchor="middle" fontSize={14} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace">
-                    {dockerReady ? "「+ Namespace」で始めましょう" : isElectron() ? "まず「🐳 Docker起動」をクリック" : "Electronで起動するとDockerと連携できます"}
-                  </text>
-                )}
-            </Canvas>
-
-            {/* Veth context menu */}
-            {vethCtxMenu && (
-              <div style={{ position: "fixed", left: vethCtxMenu.x, top: vethCtxMenu.y, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: 4, zIndex: 9999, boxShadow: "0 4px 12px rgba(0,0,0,0.4)" }}
-                onClick={() => setVethCtxMenu(null)}>
-                <div style={{ padding: "6px 16px", cursor: "pointer", fontSize: 12, color: COLORS.text, fontFamily: "'JetBrains Mono', monospace", borderRadius: 4 }}
-                  onMouseEnter={e => e.currentTarget.style.background = COLORS.border}
-                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                  onClick={() => swapVethEnds(vethCtxMenu.vethId)}>
-                  接続線の左右を入れ替え
-                </div>
-              </div>
-            )}
-
-            {/*<div style={{ position: "absolute", bottom: 16, right: 16, fontSize: 10, color: COLORS.textDim, fontFamily: "'JetBrains Mono', monospace", background: COLORS.surface+"cc", padding: "6px 10px", borderRadius: 6, border: `1px solid ${COLORS.border}` }}>
-              ドラッグ: ノード移動 · 背景ドラッグ: パン · スクロール: ズーム
-            </div>*/}
-          </div>
-
-          {/* ── Exec Log Panel ── */}
-          {showLog && (
-            <div style={{ width: 360, borderLeft: `1px solid ${COLORS.border}`, background: COLORS.bg, display: "flex", flexDirection: "column", flexShrink: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", borderBottom: `1px solid ${COLORS.border}` }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.cyan, fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase" }}>実行ログ</span>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <Btn small ghost onClick={() => setExecLog([])}>Clear</Btn>
-                  <Btn small ghost onClick={() => setShowLog(false)}><Icon d={Icons.x} size={10} color={COLORS.textMuted} /></Btn>
-                </div>
-              </div>
-              <div style={{ flex: 1, overflow: "auto", padding: 12 }}>
-                {!execLog.length && <div style={{ color: COLORS.textDim, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", padding: 8 }}>GUIの操作ログがここに表示されます</div>}
-                {execLog.map((e, i) => (
-                  <div key={i} style={{ marginBottom: 10, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
-                    <div style={{ color: COLORS.textDim, fontSize: 9 }}>{e.time}</div>
-                    <div style={{ color: COLORS.cyan }}>$ {e.cmd}</div>
-                    {e.output && <pre style={{ color: e.success ? COLORS.green : COLORS.red, margin: "2px 0 0 0", padding: 0, fontSize: 10, whiteSpace: "pre-wrap", wordBreak: "break-all", lineHeight: 1.4 }}>{e.output}</pre>}
-                  </div>
-                ))}
-                <div ref={logEndRef} />
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* ── Terminal Panel (bottom) ── */}
-        {showTerminal && terminalTabs.length > 0 && (
-          <div style={{ height: 260, borderTop: `1px solid ${COLORS.border}`, background: COLORS.bg, display: "flex", flexDirection: "column", flexShrink: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 0, borderBottom: `1px solid ${COLORS.border}`, background: COLORS.surface, flexShrink: 0, overflow: "auto" }}>
-              {terminalTabs.map(tab => (
-                <div key={tab.tabId} onClick={() => setActiveTermTab(tab.tabId)}
-                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
-                    cursor: "pointer", fontWeight: 600, color: activeTermTab === tab.tabId ? tab.color : COLORS.textDim,
-                    background: activeTermTab === tab.tabId ? COLORS.bg : "transparent",
-                    borderBottom: activeTermTab === tab.tabId ? `2px solid ${tab.color}` : "2px solid transparent",
-                    whiteSpace: "nowrap", flexShrink: 0 }}>
-                  <span style={{ width: 6, height: 6, borderRadius: 3, background: tab.color, display: "inline-block" }} />
-                  {tab.label}
-                  <span onClick={e => { e.stopPropagation(); closeTermTab(tab.tabId); }} style={{ color: COLORS.textDim, fontSize: 10, marginLeft: 4, cursor: "pointer" }}>✕</span>
-                </div>
-              ))}
-              <div style={{ flex: 1 }} />
-              <Btn small ghost onClick={() => setShowTerminal(false)} style={{ marginRight: 8 }}><Icon d={Icons.x} size={10} color={COLORS.textMuted} /></Btn>
-            </div>
-            <div style={{ flex: 1, overflow: "hidden" }}>
-              {terminalTabs.map(tab => (
-                <div key={tab.tabId} style={{ display: activeTermTab === tab.tabId ? "flex" : "none", height: "100%", flexDirection: "column" }}>
-                  {tab.kind === 'host'
-                    ? <HostTerminal tabId={tab.tabId} dockerReady={dockerReady} isElectron={isElectron} openShell={openShell} closeShell={closeShell} sendCommand={sendCommand} killSession={killSession} writeSession={writeSession} onShellData={onShellData} />
-                    : <NsTerminal tabId={tab.tabId} ns={{ id: tab.nsId, name: tab.nsName, color: tab.color }} dockerReady={dockerReady} isElectron={isElectron} openShell={openShell} closeShell={closeShell} sendCommand={sendCommand} killSession={killSession} writeSession={writeSession} onShellData={onShellData} />}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+      )}
 
       {/* ── Modals ── */}
       {modal?.type === "addNs" && (
@@ -1291,6 +1278,6 @@ export default function NetnsVisualizer() {
           </div>
         </Modal>
       )}
-    </div>
+    </>
   );
 }

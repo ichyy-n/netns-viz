@@ -14,7 +14,11 @@ export function CommandPalette({
   onAddBridge,
   onAddVeth,
   onAddVlan,
+  onAddRoute,
+  onAddCommand,
+  onGenerateCommands,
   onOpenTerminal,
+  onReset,
 }) {
   const L = LABELS_JP;
   const [q, setQ] = React.useState('');
@@ -51,8 +55,12 @@ export function CommandPalette({
       { icon: ICONS.bridge, label: 'ブリッジを追加…', run: onAddBridge, disabled: !onAddBridge },
       { icon: ICONS.link, label: 'veth ペアを作成…', run: onAddVeth, disabled: !onAddVeth },
       { icon: ICONS.vlan, label: 'VLAN を設定…', run: onAddVlan, disabled: !onAddVlan },
-      { icon: ICONS.terminal, label: 'ターミナルを開く', hint: '⌃`',
+      { icon: ICONS.plus, label: 'ルートを追加…', run: onAddRoute, disabled: !onAddRoute },
+      { icon: ICONS.plus, label: 'コマンドを追加…', run: onAddCommand, disabled: !onAddCommand },
+      { icon: ICONS.bolt, label: 'コマンドを生成', run: onGenerateCommands, disabled: !onGenerateCommands },
+      { icon: ICONS.terminal, label: 'ホストターミナルを開く', hint: '⌃`',
         run: onOpenTerminal, disabled: !onOpenTerminal },
+      { icon: ICONS.close, label: 'すべてリセット', run: onReset, disabled: !onReset },
     ]},
   ];
 

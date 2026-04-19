@@ -11,6 +11,7 @@ import { dockerStart, dockerExec, onDockerStatus } from "./ipc/docker.js";
 import { openShell, closeShell, sendCommand, killSession, writeSession, onShellData } from "./ipc/shell.js";
 import { Icon, Icons } from "./ui/primitives/Icon.jsx";
 import { Btn } from "./ui/primitives/Btn.jsx";
+import { Input } from "./ui/primitives/Input.jsx";
 
 const Modal = ({ title, onClose, children, width = 420 }) => {
   const [pos, setPos] = useState({ x: null, y: null });
@@ -74,15 +75,6 @@ const Modal = ({ title, onClose, children, width = 420 }) => {
     </div>
   );
 };
-
-const Input = ({ label, value, onChange, placeholder, mono }) => (
-  <label style={{ display: "block", marginBottom: 12 }}>
-    <span style={{ display: "block", fontSize: 11, color: COLORS.textMuted, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.05em", textTransform: "uppercase" }}>{label}</span>
-    <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-      style={{ width: "100%", padding: "8px 12px", fontSize: 13, fontFamily: mono ? "'JetBrains Mono', monospace" : "inherit",
-        color: COLORS.text, background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 6, outline: "none", boxSizing: "border-box" }} />
-  </label>
-);
 
 const Select = ({ label, value, onChange, options }) => (
   <label style={{ display: "block", marginBottom: 12 }}>

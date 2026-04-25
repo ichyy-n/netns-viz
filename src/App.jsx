@@ -2,7 +2,6 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { COLORS, NS_COLORS, NS_W } from "./theme.js";
 import { uid } from "./logic/ids.js";
 import { validateCidr, CIDR_ERROR_MSG } from "./logic/validation.js";
-import { getInterfacePositions } from "./logic/topology.js";
 import { enrichBridgeVlans } from "./logic/enrich.js";
 import { defaultState, loadGuiState, saveGuiState } from "./logic/state.js";
 import { saveFile, loadFile } from "./ipc/file.js";
@@ -20,9 +19,7 @@ import { BridgeVlanModal } from "./ui/modals/BridgeVlanModal.jsx";
 import { IptablesModal } from "./ui/modals/IptablesModal.jsx";
 import { HostTerminal } from "./ui/terminal/HostTerminal.jsx";
 import { NsTerminal } from "./ui/terminal/NsTerminal.jsx";
-import { VethEdge } from "./ui/canvas/VethEdge.jsx";
-import { NamespaceNode } from "./ui/canvas/NamespaceNode.jsx";
-import { Canvas } from "./ui/canvas/Canvas.jsx";
+import { RailCanvas } from "./ui/canvas/RailCanvas.jsx";
 import { RailShell } from "./ui/shell/RailShell.jsx";
 import { CommandPalette } from "./ui/shell/CommandPalette.jsx";
 import { buildRailView } from "./logic/rail-view.js";
@@ -644,11 +641,13 @@ export default function NetnsVisualizer() {
   }, [applyTopologyData]);
 
   /* ── Drag ── */
-  const onMouseDown = useCallback((e, nsId) => {
+  // Rail: NodeCard passes layout-resolved ns (x/y may come from auto-layout when state has null)
+  const onMouseDown = useCallback((e, ns) => {
     e.stopPropagation();
-    const ns = namespaces.find(n => n.id === nsId);
-    setDragging({ nsId, ox: e.clientX / zoom - ns.x + pan.x / zoom, oy: e.clientY / zoom - ns.y + pan.y / zoom });
-  }, [namespaces, zoom, pan]);
+    const nsX = ns.x ?? 0;
+    const nsY = ns.y ?? 0;
+    setDragging({ nsId: ns.id, ox: e.clientX / zoom - nsX + pan.x / zoom, oy: e.clientY / zoom - nsY + pan.y / zoom });
+  }, [zoom, pan]);
 
   useEffect(() => {
     if (!dragging) return;
@@ -935,7 +934,6 @@ export default function NetnsVisualizer() {
     setState(defaultState()); setSelected(null); setTerminalTabs([]); setActiveTermTab(null); setShowTerminal(false); setExecLog([]);
   };
 
-  const ifacePos = getInterfacePositions(namespaces, bridges, veths, vlans);
   const nsOptions = namespaces.map(n => ({ value: n.id, label: n.name }));
   const bridgeOptions = nsId => [{ value: "", label: "(none)" }, ...bridges.filter(b => b.nsId === nsId).map(b => ({ value: b.id, label: b.name }))];
   const railView = buildRailView(state);
@@ -951,55 +949,35 @@ export default function NetnsVisualizer() {
     return () => window.removeEventListener('keydown', h);
   }, []);
 
+  const zoomIn = useCallback(() => setZoom(z => Math.min(2, z * 1.2)), []);
+  const zoomOut = useCallback(() => setZoom(z => Math.max(0.3, z / 1.2)), []);
+  const zoomReset = useCallback(() => { setZoom(1); setPan({ x: 0, y: 0 }); }, []);
+
+  const emptyMsg = dockerReady
+    ? "「+ Namespace」で始めましょう"
+    : isElectron()
+      ? "まず「🐳 Docker起動」をクリック"
+      : "Electronで起動するとDockerと連携できます";
+
   const canvasSlot = (
-    <Canvas svgRef={svgRef} panning={panning} onMouseDown={e => { setVethCtxMenu(null); onBgMouseDown(e); }} onWheel={onWheel} zoom={zoom} pan={pan}>
-      {veths.map(v => {
-        const pA = ifacePos[v.endA.id], pB = ifacePos[v.endB.id];
-        if (!pA || !pB) return null;
-        const cp1x = pA.side === "right" ? pA.x+80 : pA.x-80;
-        const cp2x = pB.side === "left" ? pB.x-80 : pB.x+80;
-        return (
-          <VethEdge key={v.id} v={v} pA={pA} pB={pB} cp1x={cp1x} cp2x={cp2x} setVethCtxMenu={setVethCtxMenu} />
-        );
-      })}
-      {namespaces.map(ns => (
-        <NamespaceNode
-          key={ns.id}
-          ns={ns}
-          selected={selected}
-          onMouseDown={onMouseDown}
-          setSelected={setSelected}
-          dockerReady={dockerReady}
-          bridges={bridges}
-          veths={veths}
-          vlans={vlans}
-          namespaces={namespaces}
-          bridgeVlans={bridgeVlans}
-          ipForwardMap={ipForwardMap}
-          iptablesMap={iptablesMap}
-          showVlanSubIface={showVlanSubIface}
-          showMacTable={showMacTable}
-          showArpTable={showArpTable}
-          showRouteTable={showRouteTable}
-          toggleIpForward={toggleIpForward}
-          showIptables={showIptables}
-          openTerminal={openTerminal}
-          deleteNs={deleteNs}
-          toggleBridgeVlanFiltering={toggleBridgeVlanFiltering}
-          deleteBridge={deleteBridge}
-          openIfaceModal={openIfaceModal}
-          openBridgeVlanModal={openBridgeVlanModal}
-          openVlanModal={openVlanModal}
-          deleteVeth={deleteVeth}
-          deleteVlan={deleteVlan}
-        />
-      ))}
-      {!namespaces.length && (
-        <text x={300} y={200} textAnchor="middle" fontSize={14} fill={COLORS.textDim} fontFamily="'JetBrains Mono', monospace">
-          {dockerReady ? "「+ Namespace」で始めましょう" : isElectron() ? "まず「🐳 Docker起動」をクリック" : "Electronで起動するとDockerと連携できます"}
-        </text>
-      )}
-    </Canvas>
+    <RailCanvas
+      railView={railView}
+      selectedId={selected}
+      onSelect={setSelected}
+      onMouseDown={onMouseDown}
+      svgRef={svgRef}
+      panning={panning}
+      onBgMouseDown={(e) => { setVethCtxMenu(null); onBgMouseDown(e); }}
+      onWheel={onWheel}
+      zoom={zoom}
+      pan={pan}
+      onZoomIn={zoomIn}
+      onZoomOut={zoomOut}
+      onZoomReset={zoomReset}
+      onOpenNsTerminal={openTerminal}
+      onContextMenuLink={(e, link) => setVethCtxMenu({ vethId: link.id, x: e.clientX, y: e.clientY })}
+      emptyMessage={namespaces.length ? null : emptyMsg}
+    />
   );
 
   const terminalPanel = showTerminal && terminalTabs.length > 0 ? (

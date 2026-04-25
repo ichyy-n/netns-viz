@@ -2,7 +2,7 @@ import { TOKENS } from "../../theme.js";
 import { TopBar } from "./TopBar.jsx";
 import { SecondaryToolbar } from "./SecondaryToolbar.jsx";
 import { LeftRail } from "./LeftRail.jsx";
-import { Inspector } from "./Inspector.jsx";
+import { Inspector } from "../inspector/Inspector.jsx";
 
 export function RailShell({
   // TopBar
@@ -33,8 +33,6 @@ export function RailShell({
   execLog,
   showLog,
   onToggleLog,
-  // Inspector
-  onOpenNsTerminal,
   // Slots
   canvas,
   bottomPanel,
@@ -92,11 +90,8 @@ export function RailShell({
         </div>
 
         <Inspector
-          selectedId={selectedId}
-          onSelect={onSelect}
-          railView={railView}
-          onOpenNsTerminal={onOpenNsTerminal}
-          onToggleLog={onToggleLog}
+          ns={railView.nsById?.[selectedId] ?? null}
+          onClose={() => onSelect(null)}
         />
       </div>
     </div>

@@ -52,5 +52,22 @@
   ],
   "commands": [],
   "ipForwardMap": {},
-  "iptablesMap": {}
+  "iptablesMap": {},
+  "routing": {},
+  "arp": {
+    "pc1": [{"ip":"192.168.10.2","mac":"aa:bb:cc:10:00:02","dev":"veth-pc1","state":"REACHABLE"}],
+    "pc2": [{"ip":"192.168.10.1","mac":"aa:bb:cc:10:00:01","dev":"veth-pc2","state":"REACHABLE"}],
+    "pc3": [{"ip":"192.168.20.2","mac":"aa:bb:cc:20:00:02","dev":"veth-pc3","state":"REACHABLE"}],
+    "pc4": [{"ip":"192.168.20.1","mac":"aa:bb:cc:20:00:01","dev":"veth-pc4","state":"REACHABLE"}]
+  },
+  "macTable": {
+    "sw1": [
+      {"mac":"aa:bb:cc:10:00:01","port":"veth-sw1-p1","vid":10,"aging":300},
+      {"mac":"aa:bb:cc:10:00:02","port":"veth-sw1-p2","vid":10,"aging":300}
+    ],
+    "sw2": [
+      {"mac":"aa:bb:cc:20:00:01","port":"veth-sw2-p1","vid":20,"aging":300},
+      {"mac":"aa:bb:cc:20:00:02","port":"veth-sw2-p2","vid":20,"aging":300}
+    ]
+  }
 }

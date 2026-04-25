@@ -1,10 +1,12 @@
-// Rail view model builder
-// 実 state ({ namespaces, bridges, veths, vlans, bridgeVlans, ... }) から
-// Rail UI (LeftRail / Inspector / CommandPalette) が必要とする view model を作る純粋関数。
-// React 非依存。
+// Rail view model builder (rev2: IF-array based)
+// buildRailView(state) → { namespaces: nsView[], links: linksView[], ... }
 //
-// bridgeVlans 実データ形状: { nsId, dev (port名), vid, pvid, untagged, devType: 'port' }
-// veths 実データ形状: { id, endA: { name, nsId, bridge, ip, ... }, endB: { ... } }
+// nsView[i] = { id, name, role, interfaces:[{name,mac,ips[],state,peer?,vlan?,mode?,master?}],
+//               bridges, ipForward, routing?, arp?, macTable?, x, y, ... }
+// linksView[i] = { id, a:{ns,iface,nsId,port}, b:{ns,iface,nsId,port}, kind, vlan, vlans }
+//   NOTE: nsId/port aliases preserved for Phase A UI (LeftRail, Inspector) backward compatibility.
+
+import { enrichNamespaces } from './enrich.js';
 
 export function buildRailView(state) {
   const {
@@ -22,12 +24,69 @@ export function buildRailView(state) {
     bridgesByNs.get(b.nsId).push(b);
   }
 
-  // Helper: bridgeVlans for (nsId, portName)
+  // bridgeVlans lookup: (nsId, portName) → [bv, ...]
   const bvFor = (nsId, portName) =>
     bridgeVlans.filter(bv => bv.nsId === nsId && bv.dev === portName);
 
-  // Precompute host 代表 VLAN: host 側 veth end について、対向 switch 側ポートの
-  // pvid+untagged な bridgeVlans エントリの vid を拾う
+  // Quick ns name lookup for peer label
+  const nsNameById = Object.fromEntries(namespaces.map(ns => [ns.id, ns.name]));
+
+  // Build interfaces per ns from veths
+  const ifacesByNs = new Map(namespaces.map(ns => [ns.id, []]));
+
+  for (const v of veths) {
+    for (const [endKey, otherKey] of [['endA', 'endB'], ['endB', 'endA']]) {
+      const end = v[endKey];
+      const otherEnd = v[otherKey];
+      if (!ifacesByNs.has(end.nsId)) continue;
+
+      const bvs = bvFor(end.nsId, end.name);
+      let vlan;
+      let mode;
+      if (bvs.length > 0) {
+        const accessBv = bvs.find(bv => bv.pvid && bv.untagged);
+        if (accessBv) {
+          vlan = accessBv.vid;
+          mode = 'access';
+        } else {
+          mode = 'trunk';
+        }
+      }
+
+      let master;
+      if (end.bridge) {
+        const br = bridges.find(b => b.id === end.bridge);
+        if (br) master = br.name;
+      }
+
+      const otherNsName = nsNameById[otherEnd.nsId];
+      const peer = otherNsName != null ? `${otherEnd.name}@${otherNsName}` : undefined;
+
+      const iface = {
+        name: end.name,
+        mac: end.mac || '',
+        ips: end.ip ? [end.ip] : [],
+        state: end.state || 'UP',
+      };
+      if (peer !== undefined) iface.peer = peer;
+      if (vlan !== undefined) iface.vlan = vlan;
+      if (mode !== undefined) iface.mode = mode;
+      if (master !== undefined) iface.master = master;
+
+      ifacesByNs.get(end.nsId).push(iface);
+    }
+  }
+
+  // Build ns objects with interfaces + bridges, then enrich
+  const nsWithInterfaces = namespaces.map(ns => ({
+    ...ns,
+    interfaces: ifacesByNs.get(ns.id) || [],
+    bridges: bridgesByNs.get(ns.id) || [],
+  }));
+
+  const nsView = enrichNamespaces(nsWithInterfaces, state);
+
+  // Compute legacy vlan field for Phase A Inspector backward compat (host VLAN from access port)
   const hostVlanByNs = new Map();
   for (const v of veths) {
     for (const end of ['endA', 'endB']) {
@@ -41,16 +100,11 @@ export function buildRailView(state) {
       }
     }
   }
+  for (const ns of nsView) {
+    if (ns.role !== 'switch') ns.vlan = hostVlanByNs.get(ns.id) ?? null;
+  }
 
-  // ns view: + role ('switch' | 'host') + vlan + bridges
-  const nsView = namespaces.map(ns => {
-    const nsBridges = bridgesByNs.get(ns.id) || [];
-    const role = nsBridges.length > 0 ? 'switch' : 'host';
-    const vlan = role === 'host' ? (hostVlanByNs.get(ns.id) ?? null) : null;
-    return { ...ns, role, vlan, bridges: nsBridges };
-  });
-
-  // links: veth → { id, a, b, kind, vlan, vlans }
+  // Build links view: new format {ns,iface} + legacy aliases {nsId,port}
   const linksView = veths.map(v => {
     const bvA = bvFor(v.endA.nsId, v.endA.name);
     const bvB = bvFor(v.endB.nsId, v.endB.name);
@@ -58,35 +112,34 @@ export function buildRailView(state) {
     let kind = 'access';
     let vlan = null;
     let vlansOut = null;
-    if (allBvs.length === 0) {
-      kind = 'access';
-    } else if (
-      allBvs.every(bv => bv.pvid && bv.untagged) &&
-      new Set(allBvs.map(bv => bv.vid)).size === 1
-    ) {
-      kind = 'access';
-      vlan = allBvs[0].vid;
-    } else {
-      kind = 'trunk';
-      vlansOut = [...new Set(allBvs.map(bv => bv.vid))].sort((a, b) => a - b);
+    if (allBvs.length > 0) {
+      if (
+        allBvs.every(bv => bv.pvid && bv.untagged) &&
+        new Set(allBvs.map(bv => bv.vid)).size === 1
+      ) {
+        kind = 'access';
+        vlan = allBvs[0].vid;
+      } else {
+        kind = 'trunk';
+        vlansOut = [...new Set(allBvs.map(bv => bv.vid))].sort((a, b) => a - b);
+      }
     }
     return {
       id: v.id,
-      a: { nsId: v.endA.nsId, port: v.endA.name },
-      b: { nsId: v.endB.nsId, port: v.endB.name },
+      a: { ns: v.endA.nsId, iface: v.endA.name, nsId: v.endA.nsId, port: v.endA.name },
+      b: { ns: v.endB.nsId, iface: v.endB.name, nsId: v.endB.nsId, port: v.endB.name },
       kind,
       vlan,
       vlans: vlansOut,
     };
   });
 
-  // VLAN ID 集合: bridgeVlans + state.vlans 由来
+  // VLAN ID set
   const vlanIds = [...new Set([
     ...bridgeVlans.map(bv => bv.vid),
     ...vlans.map(v => v.vlanId || v.vid),
   ])].filter(Boolean).sort((a, b) => a - b);
 
-  // nsById: Inspector O(1) 参照用
   const nsById = Object.fromEntries(nsView.map(n => [n.id, n]));
 
   return {
@@ -97,6 +150,7 @@ export function buildRailView(state) {
     links: linksView,
     vlanIds,
     switches: nsView.filter(n => n.role === 'switch'),
+    routers: nsView.filter(n => n.role === 'router'),
     hosts: nsView.filter(n => n.role === 'host'),
     nsById,
   };

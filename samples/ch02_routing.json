@@ -25,5 +25,22 @@
   "bridgeVlans": [],
   "commands": [],
   "ipForwardMap": { "ch02-ns-router": true },
-  "iptablesMap": {}
+  "iptablesMap": {},
+  "routing": {
+    "router": [
+      {"dst":"192.168.1.0/24","via":null,"dev":"veth-router-a","proto":"kernel"},
+      {"dst":"192.168.2.0/24","via":null,"dev":"veth-router-b","proto":"kernel"}
+    ],
+    "pc1": [{"dst":"0.0.0.0/0","via":"192.168.1.254","dev":"veth-pc1","proto":"static"}],
+    "pc2": [{"dst":"0.0.0.0/0","via":"192.168.2.254","dev":"veth-pc2","proto":"static"}]
+  },
+  "arp": {
+    "router": [
+      {"ip":"192.168.1.1","mac":"aa:bb:cc:00:01:01","dev":"veth-router-a","state":"REACHABLE"},
+      {"ip":"192.168.2.1","mac":"aa:bb:cc:00:02:01","dev":"veth-router-b","state":"REACHABLE"}
+    ],
+    "pc1": [{"ip":"192.168.1.254","mac":"aa:bb:cc:00:01:fe","dev":"veth-pc1","state":"REACHABLE"}],
+    "pc2": [{"ip":"192.168.2.254","mac":"aa:bb:cc:00:02:fe","dev":"veth-pc2","state":"REACHABLE"}]
+  },
+  "macTable": {}
 }

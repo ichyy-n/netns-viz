@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { COLORS, NS_COLORS, NS_W } from "./theme.js";
+import { COLORS, NS_COLORS, NS_W, TOKENS } from "./theme.js";
 import { uid } from "./logic/ids.js";
 import { validateCidr, CIDR_ERROR_MSG } from "./logic/validation.js";
 import { getInterfacePositions } from "./logic/topology.js";
@@ -14,6 +14,8 @@ import { Input } from "./ui/primitives/Input.jsx";
 import { Select } from "./ui/primitives/Select.jsx";
 import { Modal } from "./ui/primitives/Modal.jsx";
 import { RouteModal } from "./ui/modals/RouteModal.jsx";
+import { ArpModal } from "./ui/modals/ArpModal.jsx";
+import { MacTableModal } from "./ui/modals/MacTableModal.jsx";
 import { IfaceModal } from "./ui/modals/IfaceModal.jsx";
 import { VlanModal } from "./ui/modals/VlanModal.jsx";
 import { BridgeVlanModal } from "./ui/modals/BridgeVlanModal.jsx";
@@ -23,6 +25,7 @@ import { NsTerminal } from "./ui/terminal/NsTerminal.jsx";
 import { VethEdge } from "./ui/canvas/VethEdge.jsx";
 import { NamespaceNode } from "./ui/canvas/NamespaceNode.jsx";
 import { Canvas } from "./ui/canvas/Canvas.jsx";
+import { Inspector } from "./ui/inspector/Inspector.jsx";
 
 const isElectron = () => Boolean(window.electronAPI);
 
@@ -64,7 +67,9 @@ export default function NetnsVisualizer() {
   const [ipForwardMap, setIpForwardMap] = useState({});
   const [iptablesMap, setIptablesMap] = useState({});
   const [iptablesModal, setIptablesModal] = useState(null);
-  const update = useCallback((fn) => setState(prev => { const n = JSON.parse(JSON.stringify(prev)); fn(n); return n; }), []);
+  const [currentFileName, setCurrentFileName] = useState(null);
+  const [isDirty, setIsDirty] = useState(false);
+  const update = useCallback((fn) => { setState(prev => { const n = JSON.parse(JSON.stringify(prev)); fn(n); return n; }); setIsDirty(true); }, []);
   const swapVethEnds = useCallback((vethId) => {
     update(s => {
       const v = s.veths.find(vv => vv.id === vethId);
@@ -345,23 +350,28 @@ export default function NetnsVisualizer() {
     if (!dockerReady) return;
     const timer = setInterval(syncVethRuntime, 2000);
     return () => clearInterval(timer);
-  }, [dockerReady]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [dockerReady, syncVethRuntime]);
 
   /* ── Terminal tabs ── */
   const openTerminal = useCallback((ns) => {
     setShowTerminal(true);
     const count = terminalTabs.filter(t => t.nsId === ns.id).length;
     const tabId = `${ns.id}_${Date.now()}`;
+    const isSw = bridges.some(b => b.nsId === ns.id);
+    let ifCount = 0;
+    veths.forEach(v => { if (v.endA.nsId === ns.id) ifCount++; if (v.endB.nsId === ns.id) ifCount++; });
+    const role = isSw ? 'switch' : (ifCount >= 2 && ipForwardMap[ns.id]) ? 'router' : 'host';
+    const roleColor = { switch: TOKENS.magenta, router: TOKENS.amber, host: TOKENS.sky }[role];
     setTerminalTabs(prev => [...prev, {
       tabId,
       kind: 'ns',
       nsId: ns.id,
       nsName: ns.name,
-      color: ns.color,
+      color: roleColor,
       label: count === 0 ? ns.name : `${ns.name} (${count + 1})`,
     }]);
     setActiveTermTab(tabId);
-  }, [terminalTabs]);
+  }, [terminalTabs, bridges, veths, ipForwardMap]);
 
   const openHostTerminal = useCallback(() => {
     setShowTerminal(true);
@@ -513,13 +523,13 @@ export default function NetnsVisualizer() {
     update(s => { s.bridgeVlans = s.bridgeVlans.filter(b => b.id !== bvId); });
   }, [bridgeVlans, namespaces, dockerReady, execAndLog, update]);
 
-  const openVlanModal = useCallback((vethId, end, ifaceName, nsId) => {
-    setVlanModal({ vethId, end, ifaceName, nsId, vlanId: '', ip: '', removeParentIp: false });
+  const openVlanModal = useCallback((vethId, end, ifaceName, nsId, parentType = 'veth', parentId = null) => {
+    setVlanModal({ vethId, end, ifaceName, nsId, vlanId: '', ip: '', removeParentIp: false, parentType, parentId: parentId || vethId });
   }, []);
 
   const confirmVlan = useCallback(async () => {
     if (!vlanModal) return;
-    const { vethId, end, ifaceName, nsId, vlanId: vidStr, ip, removeParentIp } = vlanModal;
+    const { vethId, end, ifaceName, nsId, vlanId: vidStr, ip, removeParentIp, parentType: pType = 'veth', parentId: pId } = vlanModal;
     if (!validateCidr(ip)) { alert(CIDR_ERROR_MSG); return; }
     const vid = parseInt(vidStr, 10);
     if (!vid || vid < 1 || vid > 4094) return;
@@ -529,7 +539,7 @@ export default function NetnsVisualizer() {
     const subName = `${ifaceName}.${vid}`;
 
     if (dockerReady) {
-      if (removeParentIp) {
+      if (removeParentIp && pType === 'veth') {
         const v = veths.find(vv => vv.id === vethId);
         const parentIp = v ? v[end].ip : null;
         if (parentIp) await execAndLog(`${prefix} ip addr del ${parentIp} dev ${ifaceName}`);
@@ -539,7 +549,7 @@ export default function NetnsVisualizer() {
       if (ip) await execAndLog(`${prefix} ip addr add ${ip} dev ${subName}`);
     }
     update(s => {
-      s.vlans.push({ id: uid(), parentType: 'veth', parentId: vethId, parentEnd: end, vlanId: vid, name: subName, ip: ip || null, nsId });
+      s.vlans.push({ id: uid(), parentType: pType, parentId: pId || vethId, parentEnd: end || null, vlanId: vid, name: subName, ip: ip || null, nsId, parentIface: ifaceName });
     });
     setVlanModal(null);
   }, [vlanModal, namespaces, veths, dockerReady, execAndLog, update]);
@@ -549,6 +559,7 @@ export default function NetnsVisualizer() {
     const r = await dockerExec(`ip netns exec ${ns.name} ip route show`);
     setRouteModal({ nsId: ns.id, nsName: ns.name, nsColor: ns.color, routes: r.success ? r.output : 'Failed to fetch routes' });
   }, [dockerReady]);
+
 
   const showMacTable = useCallback(async (ns) => {
     if (!dockerReady) return;
@@ -627,7 +638,12 @@ export default function NetnsVisualizer() {
   const saveTopology = useCallback(async () => {
     if (!isElectron()) return;
     const r = await saveFile({ ...state, ipForwardMap, iptablesMap });
-    if (r.success) addExecLog('save', `Saved to ${r.filePath}`);
+    if (r.success) {
+      addExecLog('save', `Saved to ${r.filePath}`);
+      const name = r.filePath ? r.filePath.split(/[/\\]/).pop() : null;
+      if (name) setCurrentFileName(name);
+      setIsDirty(false);
+    }
   }, [state, ipForwardMap, iptablesMap, addExecLog]);
 
   const loadTopology = useCallback(async () => {
@@ -635,6 +651,9 @@ export default function NetnsVisualizer() {
     const r = await loadFile();
     if (!r.success) return;
     await applyTopologyData(r.data);
+    const name = r.filePath ? r.filePath.split(/[/\\]/).pop() : null;
+    setCurrentFileName(name);
+    setIsDirty(false);
   }, [applyTopologyData]);
 
   /* ── Drag ── */
@@ -927,9 +946,10 @@ export default function NetnsVisualizer() {
   const resetAll = async () => {
     if (dockerReady) for (const ns of namespaces) await execAndLog(`ip netns del ${ns.name}`);
     setState(defaultState()); setSelected(null); setTerminalTabs([]); setActiveTermTab(null); setShowTerminal(false); setExecLog([]);
+    setCurrentFileName(null); setIsDirty(false);
   };
 
-  const ifacePos = getInterfacePositions(namespaces, bridges, veths, vlans);
+  const ifacePos = getInterfacePositions(namespaces, bridges, veths, vlans, ipForwardMap);
   const nsOptions = namespaces.map(n => ({ value: n.id, label: n.name }));
   const bridgeOptions = nsId => [{ value: "", label: "(none)" }, ...bridges.filter(b => b.nsId === nsId).map(b => ({ value: b.id, label: b.name }))];
 
@@ -940,40 +960,170 @@ export default function NetnsVisualizer() {
     <div style={{ width: "100vw", height: "100vh", background: COLORS.bg, display: "flex", flexDirection: "column", fontFamily: "'Segoe UI', system-ui, sans-serif", color: COLORS.text, overflow: "hidden" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:${COLORS.bg}}::-webkit-scrollbar-thumb{background:${COLORS.border};border-radius:3px}`}</style>
 
-      {/* ── Top Bar ── */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", borderBottom: `1px solid ${COLORS.border}`, background: COLORS.surface, flexShrink: 0, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ width: 28, height: 28, borderRadius: 6, background: `linear-gradient(135deg, ${COLORS.accent}, ${COLORS.purple})`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Icon d={Icons.network} size={15} color="#fff" />
+      {/* ── Top Bar (Row 1) ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 16px", borderBottom: `1px solid ${TOKENS.line}`, background: TOKENS.bg2, flexShrink: 0 }}>
+        {/* Logo + name */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 26, height: 26, borderRadius: 7, background: `linear-gradient(135deg, ${TOKENS.indigo}, ${TOKENS.magenta})`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Icon d={Icons.network} size={14} color="#fff" />
           </div>
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, fontSize: 14 }}>netns<span style={{ color: COLORS.accent }}>viz</span></span>
+          <span style={{ fontFamily: TOKENS.fontMono, fontWeight: 700, fontSize: 14, color: TOKENS.text }}>netns-viz</span>
         </div>
-        <div style={{ width: 1, height: 20, background: COLORS.border }} />
 
-        {isElectron() && (<>
-          {!dockerReady
-            ? <Btn small onClick={startDocker} disabled={dockerLoading} color={dockerLoading ? COLORS.textDim : COLORS.green}>{dockerLoading ? "⏳ 起動中..." : "🐳 Docker起動"}</Btn>
-            : <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: COLORS.green, fontFamily: "'JetBrains Mono', monospace" }}><span style={{ width: 6, height: 6, borderRadius: 3, background: COLORS.green, display: "inline-block" }} />Docker Ready</div>}
-          <div style={{ width: 1, height: 20, background: COLORS.border }} />
-        </>)}
-
-        <Btn small onClick={addNs} disabled={isElectron() && !dockerReady}><Icon d={Icons.plus} size={12} color="#fff" /> Namespace</Btn>
-        <Btn small onClick={addBridge} color={COLORS.green} disabled={!namespaces.length}><Icon d={Icons.plus} size={12} color="#fff" /> Bridge(L2SW)</Btn>
-        <Btn small onClick={addVeth} color={COLORS.orange} disabled={!namespaces.length}><Icon d={Icons.plus} size={12} color="#fff" /> Veth Pair</Btn>
-        <Btn small onClick={addRoute} color={COLORS.purple} disabled={!namespaces.length}><Icon d={Icons.plus} size={12} color="#fff" /> Route</Btn>
-        <Btn small onClick={addCommand} color={COLORS.cyan} disabled={!namespaces.length}><Icon d={Icons.plus} size={12} color="#fff" /> Command</Btn>
+        {/* Breadcrumb */}
+        <span style={{ color: TOKENS.textFaint, fontSize: 12 }}>›</span>
+        <span style={{ fontFamily: TOKENS.fontMono, fontSize: 12, color: currentFileName ? TOKENS.text : TOKENS.textDim }}>
+          {currentFileName || '無題'}{isDirty && <span style={{ color: TOKENS.amber, marginLeft: 4 }}>*</span>}
+        </span>
 
         <div style={{ flex: 1 }} />
 
+        {/* Docker status */}
+        {isElectron() && (
+          !dockerReady
+            ? <button onClick={startDocker} disabled={dockerLoading} style={{
+                display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", fontSize: 11,
+                fontFamily: TOKENS.fontMono, fontWeight: 500,
+                background: TOKENS.surface, color: TOKENS.textMid,
+                border: `1px solid ${TOKENS.line}`, borderRadius: 6, cursor: dockerLoading ? "wait" : "pointer",
+              }}>
+                <span style={{ width: 6, height: 6, borderRadius: 3, background: TOKENS.textDim }} />
+                {dockerLoading ? "起動中..." : "Docker 未接続"}
+              </button>
+            : <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", fontSize: 11,
+                fontFamily: TOKENS.fontMono, fontWeight: 500, color: TOKENS.green,
+                background: TOKENS.greenSoft, border: `1px solid ${TOKENS.green}30`, borderRadius: 6 }}>
+                <span style={{ width: 6, height: 6, borderRadius: 3, background: TOKENS.green }} />
+                Docker 接続中
+              </div>
+        )}
+
+        {/* Host Terminal */}
+        {isElectron() && (
+          <button onClick={openHostTerminal} disabled={!dockerReady} style={{
+            display: "flex", alignItems: "center", gap: 6, padding: "4px 12px", fontSize: 11,
+            fontFamily: TOKENS.fontMono, fontWeight: 500,
+            background: TOKENS.surface, color: TOKENS.textMid,
+            border: `1px solid ${TOKENS.line}`, borderRadius: 6,
+            cursor: dockerReady ? "pointer" : "not-allowed", opacity: dockerReady ? 1 : 0.4,
+          }}>
+            <span style={{ fontWeight: 600 }}>&gt;_</span>
+            <span>ターミナル（Linuxホスト）</span>
+          </button>
+        )}
+
+        {/* Generate Commands (primary action) */}
+        <button onClick={generateCommands} disabled={!namespaces.length} style={{
+          display: "flex", alignItems: "center", gap: 6, padding: "5px 14px", fontSize: 11,
+          fontFamily: TOKENS.fontMono, fontWeight: 600,
+          background: namespaces.length ? `linear-gradient(135deg, ${TOKENS.indigo}, ${TOKENS.magenta})` : TOKENS.surface,
+          color: "#fff", border: "none", borderRadius: 6,
+          cursor: namespaces.length ? "pointer" : "not-allowed", opacity: namespaces.length ? 1 : 0.4,
+        }}>
+          <Icon d={Icons.terminal} size={12} color="#fff" />
+          コマンド生成
+        </button>
+      </div>
+
+      {/* ── Action Bar (Row 2) ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 16px", borderBottom: `1px solid ${TOKENS.line}`, background: TOKENS.bg, flexShrink: 0 }}>
+        {/* Create actions */}
+        <button onClick={addNs} disabled={isElectron() && !dockerReady} style={{
+          display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", fontSize: 11,
+          fontFamily: TOKENS.fontMono, fontWeight: 500,
+          background: "transparent", color: TOKENS.textMid,
+          border: "none", borderRadius: 5,
+          cursor: (isElectron() && !dockerReady) ? "not-allowed" : "pointer",
+          opacity: (isElectron() && !dockerReady) ? 0.4 : 1,
+        }}>
+          <Icon d={Icons.plus} size={11} color={TOKENS.text} />
+          Namespace
+        </button>
+        <button onClick={addBridge} disabled={!namespaces.length} style={{
+          display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", fontSize: 11,
+          fontFamily: TOKENS.fontMono, fontWeight: 500,
+          background: "transparent", color: TOKENS.textMid,
+          border: "none", borderRadius: 5,
+          cursor: namespaces.length ? "pointer" : "not-allowed", opacity: namespaces.length ? 1 : 0.4,
+        }}>
+          <Icon d={Icons.plus} size={11} color={TOKENS.text} />
+          ブリッジ
+        </button>
+        <button onClick={addVeth} disabled={!namespaces.length} style={{
+          display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", fontSize: 11,
+          fontFamily: TOKENS.fontMono, fontWeight: 500,
+          background: "transparent", color: TOKENS.textMid,
+          border: "none", borderRadius: 5,
+          cursor: namespaces.length ? "pointer" : "not-allowed", opacity: namespaces.length ? 1 : 0.4,
+        }}>
+          <Icon d={Icons.plus} size={11} color={TOKENS.text} />
+          veth ペア
+        </button>
+        <button onClick={addRoute} disabled={!namespaces.length} style={{
+          display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", fontSize: 11,
+          fontFamily: TOKENS.fontMono, fontWeight: 500,
+          background: "transparent", color: TOKENS.textMid,
+          border: "none", borderRadius: 5,
+          cursor: namespaces.length ? "pointer" : "not-allowed", opacity: namespaces.length ? 1 : 0.4,
+        }}>
+          <Icon d={Icons.plus} size={11} color={TOKENS.text} />
+          ルート
+        </button>
+        <button onClick={addCommand} disabled={!namespaces.length} style={{
+          display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", fontSize: 11,
+          fontFamily: TOKENS.fontMono, fontWeight: 500,
+          background: "transparent", color: TOKENS.textMid,
+          border: "none", borderRadius: 5,
+          cursor: namespaces.length ? "pointer" : "not-allowed", opacity: namespaces.length ? 1 : 0.4,
+        }}>
+          <Icon d={Icons.plus} size={11} color={TOKENS.text} />
+          コマンド
+        </button>
+
+        <div style={{ flex: 1 }} />
+
+        {/* File ops */}
         {isElectron() && (<>
-          <Btn small ghost onClick={saveTopology} disabled={!namespaces.length}><Icon d={Icons.save} size={12} color={COLORS.textMuted} /> 保存</Btn>
-          <Btn small ghost onClick={loadTopology}><Icon d={Icons.folder} size={12} color={COLORS.textMuted} /> 読込</Btn>
+          <button onClick={saveTopology} disabled={!namespaces.length} style={{
+            display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", fontSize: 11,
+            fontFamily: TOKENS.fontMono, fontWeight: 500,
+            background: "transparent", color: TOKENS.textMid,
+            border: "none", borderRadius: 5,
+            cursor: namespaces.length ? "pointer" : "not-allowed", opacity: namespaces.length ? 1 : 0.4,
+          }}>
+            <Icon d={Icons.save} size={11} color={TOKENS.textDim} />
+            保存
+          </button>
+          <button onClick={loadTopology} style={{
+            display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", fontSize: 11,
+            fontFamily: TOKENS.fontMono, fontWeight: 500,
+            background: "transparent", color: TOKENS.textMid,
+            border: "none", borderRadius: 5, cursor: "pointer",
+          }}>
+            <Icon d={Icons.folder} size={11} color={TOKENS.textDim} />
+            読込
+          </button>
         </>)}
-        <Btn small ghost onClick={() => setShowLog(!showLog)}><Icon d={Icons.code} size={12} color={COLORS.textMuted} /> ログ</Btn>
-<Btn small ghost onClick={generateCommands} disabled={!namespaces.length}><Icon d={Icons.terminal} size={12} color={COLORS.textMuted} /> コマンド生成</Btn>
-        {isElectron() && <Btn small ghost onClick={openHostTerminal} disabled={!dockerReady}><Icon d={Icons.terminal} size={12} color={COLORS.textMuted} /> ターミナル(host)</Btn>}
-        <Btn small ghost onClick={resetAll}><Icon d={Icons.x} size={12} color={COLORS.textMuted} /> リセット</Btn>
-        <div style={{ fontSize: 11, color: COLORS.textDim, fontFamily: "'JetBrains Mono', monospace" }}>{Math.round(zoom * 100)}%</div>
+        <button onClick={() => setShowLog(!showLog)} style={{
+          display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", fontSize: 11,
+          fontFamily: TOKENS.fontMono, fontWeight: 500,
+          background: showLog ? TOKENS.surface : "transparent",
+          color: TOKENS.textMid, border: "none", borderRadius: 5, cursor: "pointer",
+        }}>
+          <Icon d={Icons.code} size={11} color={TOKENS.textDim} />
+          ログ
+        </button>
+        <button onClick={resetAll} style={{
+          display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", fontSize: 11,
+          fontFamily: TOKENS.fontMono, fontWeight: 500,
+          background: "transparent", color: TOKENS.textMid,
+          border: "none", borderRadius: 5, cursor: "pointer",
+        }}>
+          <Icon d={Icons.x} size={11} color={TOKENS.textDim} />
+          リセット
+        </button>
+        <div style={{ width: 1, height: 18, background: TOKENS.line, margin: "0 4px" }} />
+        <div style={{ fontSize: 11, color: TOKENS.textDim, fontFamily: TOKENS.fontMono, padding: "0 4px" }}>{Math.round(zoom * 100)}%</div>
       </div>
 
       {/* ── Main Area ── */}
@@ -1052,6 +1202,33 @@ export default function NetnsVisualizer() {
               ドラッグ: ノード移動 · 背景ドラッグ: パン · スクロール: ズーム
             </div>*/}
           </div>
+
+          {/* ── Inspector Panel ── */}
+          {selected && (
+            <Inspector
+              ns={namespaces.find(n => n.id === selected)}
+              bridges={bridges}
+              veths={veths}
+              vlans={vlans}
+              bridgeVlans={bridgeVlans}
+              namespaces={namespaces}
+              ipForwardMap={ipForwardMap}
+              dockerReady={dockerReady}
+              onClose={() => setSelected(null)}
+              onDeleteNs={deleteNs}
+              onDeleteVeth={deleteVeth}
+              onEditIface={openIfaceModal}
+              onToggleIpForward={toggleIpForward}
+              onOpenTerminal={openTerminal}
+              onShowRouteTable={showRouteTable}
+              onShowArpTable={showArpTable}
+              onShowMacTable={showMacTable}
+              onOpenBridgeVlanModal={openBridgeVlanModal}
+              onOpenVlanModal={openVlanModal}
+              onDeleteVlan={deleteVlan}
+              onToggleBridgeVlanFiltering={toggleBridgeVlanFiltering}
+            />
+          )}
 
           {/* ── Exec Log Panel ── */}
           {showLog && (
@@ -1199,50 +1376,13 @@ export default function NetnsVisualizer() {
         <RouteModal routeModal={routeModal} setRouteModal={setRouteModal} showRouteTable={showRouteTable} />
       )}
 
-      {macTableModal && (() => {
-        const rawEntries = macTableModal.entries || '';
-        const filteredEntries = rawEntries ? rawEntries.split('\n').filter(line => {
-          const trimmed = line.trim();
-          if (!trimmed) return false;
-          return trimmed.includes('master') && !trimmed.includes('permanent') && !trimmed.includes('self');
-        }).join('\n') : '';
-        const displayEntries = macTableShowAll ? rawEntries : filteredEntries;
-        const showEmptyMessage = !macTableShowAll && !filteredEntries;
-        return (
-        <Modal title={`MAC Table: ${macTableModal.nsName}`} onClose={() => { setMacTableModal(null); setMacTableShowAll(false); }} width={500}>
-          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-            <Btn small ghost={macTableShowAll} onClick={() => setMacTableShowAll(false)}
-              style={!macTableShowAll ? { background: COLORS.accent, color: '#fff' } : {}}>学習済みのみ</Btn>
-            <Btn small ghost={!macTableShowAll} onClick={() => setMacTableShowAll(true)}
-              style={macTableShowAll ? { background: COLORS.accent, color: '#fff' } : {}}>すべて表示</Btn>
-          </div>
-          {showEmptyMessage ? (
-            <div style={{ background: COLORS.bg, color: COLORS.textMuted, padding: 16, borderRadius: 8, fontSize: 12, border: `1px solid ${COLORS.border}`, textAlign: 'center' }}>
-              まだMACアドレスが学習されていません。pingを実行すると学習されます。
-            </div>
-          ) : (
-            <pre style={{ background: COLORS.bg, color: COLORS.green, padding: 16, borderRadius: 8, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.7, border: `1px solid ${COLORS.border}`, whiteSpace: "pre-wrap", maxHeight: 300, overflow: "auto" }}>
-              {displayEntries || '(empty)'}
-            </pre>
-          )}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
-            <Btn small ghost onClick={() => showMacTable({ id: macTableModal.nsId, name: macTableModal.nsName, color: macTableModal.nsColor })}>🔄 更新</Btn>
-            <Btn small ghost onClick={() => { setMacTableModal(null); setMacTableShowAll(false); }}>閉じる</Btn>
-          </div>
-        </Modal>
-        );
-      })()}
+      {macTableModal && (
+        <MacTableModal macTableModal={macTableModal} setMacTableModal={setMacTableModal}
+          showMacTable={showMacTable} showAll={macTableShowAll} setShowAll={setMacTableShowAll} />
+      )}
 
       {arpTableModal && (
-        <Modal title={`ARP Table: ${arpTableModal.nsName}`} onClose={() => setArpTableModal(null)} width={500}>
-          <pre style={{ background: COLORS.bg, color: COLORS.green, padding: 16, borderRadius: 8, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.7, border: `1px solid ${COLORS.border}`, whiteSpace: "pre-wrap", maxHeight: 300, overflow: "auto" }}>
-            {arpTableModal.entries || '(empty)'}
-          </pre>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
-            <Btn small ghost onClick={() => showArpTable({ id: arpTableModal.nsId, name: arpTableModal.nsName })}>🔄 更新</Btn>
-            <Btn small ghost onClick={() => setArpTableModal(null)}>閉じる</Btn>
-          </div>
-        </Modal>
+        <ArpModal arpModal={arpTableModal} setArpModal={setArpTableModal} showArpTable={showArpTable} />
       )}
 
       {iptablesModal && (

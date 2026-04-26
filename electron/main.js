@@ -233,5 +233,5 @@ ipcMain.handle('file-load', async (event) => {
   })
   if (canceled || filePaths.length === 0) return { success: false }
   const content = await fs.readFile(filePaths[0], 'utf-8')
-  return { success: true, data: JSON.parse(content) }
+  return { success: true, data: JSON.parse(content), filePath: filePaths[0] }
 })

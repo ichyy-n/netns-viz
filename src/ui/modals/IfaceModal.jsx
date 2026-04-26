@@ -8,7 +8,6 @@ export const IfaceModal = ({ ifaceModal, setIfaceModal, deleteIfaceIp, changeIfa
     <Modal title={`インターフェース設定: ${ifaceModal.ifaceName}`} onClose={() => setIfaceModal(null)} width={420}>
       <div style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 12, fontFamily: "'JetBrains Mono', monospace", display: "flex", alignItems: "center", gap: 8 }}>
         <span>現在のIP: <span style={{ color: COLORS.text }}>{ifaceModal.currentIp || '(未設定)'}</span></span>
-        {ifaceModal.currentIp && <Btn small color={COLORS.red} onClick={deleteIfaceIp} style={{ padding: "2px 8px", fontSize: 10 }}>削除</Btn>}
       </div>
       <Input label="新しいIPアドレス (CIDR)" value={ifaceModal.newIp} onChange={v => setIfaceModal({...ifaceModal, newIp: v})} mono placeholder="192.168.1.1/24" />
       <div style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 12, fontFamily: "'JetBrains Mono', monospace" }}>

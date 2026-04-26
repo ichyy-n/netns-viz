@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Refactoring snapshots (smoke test artifacts, not for git)
+tests/refactor_*
+docs/_snapshot/

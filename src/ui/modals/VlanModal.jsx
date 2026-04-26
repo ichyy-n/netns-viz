@@ -5,20 +5,24 @@ import { Modal } from "../primitives/Modal.jsx";
 
 export const VlanModal = ({ vlanModal, setVlanModal, vlans, confirmVlan }) => {
   return (
-    <Modal title={`VLAN サブインターフェース: ${vlanModal.ifaceName}`} onClose={() => setVlanModal(null)} width={420}>
+    <Modal title={`仮想IF作成: ${vlanModal.ifaceName}`} onClose={() => setVlanModal(null)} width={420}>
       <Input label="VLAN ID (1-4094)" value={vlanModal.vlanId}
         onChange={v => setVlanModal({...vlanModal, vlanId: v})} mono placeholder="100" />
       <Input label="IPアドレス (任意)" value={vlanModal.ip}
         onChange={v => setVlanModal({...vlanModal, ip: v})} mono placeholder="10.0.100.1/24" />
-      <label style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12, fontSize: 11, color: COLORS.textMuted, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
-        <input type="checkbox" checked={vlanModal.removeParentIp}
-          onChange={e => setVlanModal({...vlanModal, removeParentIp: e.target.checked})} />
-        親インターフェースのIPを削除
-      </label>
+      {vlanModal.parentType !== 'bridge' && (
+        <label style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12, fontSize: 11, color: COLORS.textMuted, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
+          <input type="checkbox" checked={vlanModal.removeParentIp}
+            onChange={e => setVlanModal({...vlanModal, removeParentIp: e.target.checked})} />
+          親インターフェースのIPを削除
+        </label>
+      )}
 
       {/* Existing VLANs */}
       {(() => {
-        const existing = vlans.filter(vl => vl.parentId === vlanModal.vethId && vl.parentEnd === vlanModal.end);
+        const existing = vlanModal.parentType === 'bridge'
+          ? vlans.filter(vl => vl.parentId === vlanModal.parentId && vl.parentType === 'bridge')
+          : vlans.filter(vl => vl.parentId === vlanModal.vethId && vl.parentEnd === vlanModal.end);
         if (!existing.length) return null;
         return (
           <div style={{ marginBottom: 12 }}>

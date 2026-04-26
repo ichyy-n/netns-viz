@@ -9,6 +9,38 @@ export const COLORS = {
 
 export const NS_COLORS = ["#3b82f6","#10b981","#f59e0b","#a855f7","#06b6d4","#ef4444","#ec4899","#84cc16"];
 
-export const NS_W = 380;
-export const NS_HEADER = 44;
-export const NS_ITEM_H = 44;
+export const NS_W = 250;
+export const NS_W_SWITCH = 220;
+export const NS_HEADER = 32;
+export const NS_ITEM_H = 36;
+export const NS_FOOTER = 10;
+
+// Rail design tokens
+export const TOKENS = {
+  bg: '#0a0a0c',
+  bg2: '#0f0f12',
+  surface: '#141418',
+  surface2: '#1a1a20',
+  surfaceHi: '#22222a',
+  line: '#26262e',
+  lineSoft: '#1e1e24',
+  text: '#e8e8ee',
+  textMid: '#a8a8b4',
+  textDim: '#6a6a76',
+  textFaint: '#44444d',
+
+  indigo: '#7b7ee8',
+  indigoSoft: 'rgba(123,126,232,0.12)',
+  red: '#f15f5f',
+  redSoft: 'rgba(241,95,95,0.12)',
+  green: '#5ec08a',
+  greenSoft: 'rgba(94,192,138,0.12)',
+  amber: '#e8b15e',
+  amberSoft: 'rgba(232,177,94,0.14)',
+  sky: '#5ea3e8',
+  skySoft: 'rgba(94,163,232,0.14)',
+  magenta: '#d968c7',
+  magentaSoft: 'rgba(217,104,199,0.14)',
+
+  fontMono: '"JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace',
+};

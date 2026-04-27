@@ -799,7 +799,7 @@ export default function NetnsVisualizer() {
   }, [namespaces, bridges, veths, vlans, bridgeVlans, routes, commands]);
 
   /* ── Add operations ── */
-  const addNs = () => { const i = namespaces.length; setModal({ type: "addNs", data: { name: `ns${i+1}`, color: NS_COLORS[i%NS_COLORS.length] } }); };
+  const addNs = () => { const i = namespaces.length; setModal({ type: "addNs", data: { name: `ns${i+1}` } }); };
   const addBridge = () => setModal({ type: "addBridge", data: { name: `br${bridges.length}`, nsId: namespaces[0]?.id||"", ip: "" } });
   const addVeth = () => { const i = veths.length+1; setModal({ type: "addVeth", data: { name: `veth-pair-${i}`, endAName: `veth${i}a`, endANs: namespaces[0]?.id||"", endAIp: "", endAMac: "", endABridge: "", endBName: `veth${i}b`, endBNs: namespaces[1]?.id||namespaces[0]?.id||"", endBIp: "", endBMac: "", endBBridge: "" } }); };
   const addRoute = () => setModal({ type: "addRoute", data: { nsId: namespaces[0]?.id||"", dest: "", gateway: "", iface: "" } });
@@ -820,7 +820,7 @@ export default function NetnsVisualizer() {
           setIpForwardMap(prev => ({ ...prev, [nsId]: fwVal }));
         }
       }
-      update(s => { const mx = s.namespaces.reduce((m,n) => Math.max(m,n.x), 0); s.namespaces.push({ id: nsId, name: data.name, x: s.namespaces.length === 0 ? 150 : mx + NS_W + 60, y: 200, color: data.color, isDefault: false }); });
+      update(s => { const mx = s.namespaces.reduce((m,n) => Math.max(m,n.x), 0); s.namespaces.push({ id: nsId, name: data.name, x: s.namespaces.length === 0 ? 150 : mx + NS_W + 60, y: 200, isDefault: false }); });
     } else if (type === "addBridge") {
       if (!validateCidr(data.ip)) { alert(CIDR_ERROR_MSG); return; }
       const ns = namespaces.find(n => n.id === data.nsId);
@@ -1012,15 +1012,15 @@ export default function NetnsVisualizer() {
           </button>
         )}
 
-        {/* Generate Commands (primary action) */}
+        {/* Generate Commands */}
         <button onClick={generateCommands} disabled={!namespaces.length} style={{
-          display: "flex", alignItems: "center", gap: 6, padding: "5px 14px", fontSize: 11,
-          fontFamily: TOKENS.fontMono, fontWeight: 600,
-          background: namespaces.length ? `linear-gradient(135deg, ${TOKENS.indigo}, ${TOKENS.magenta})` : TOKENS.surface,
-          color: "#fff", border: "none", borderRadius: 6,
+          display: "flex", alignItems: "center", gap: 6, padding: "4px 12px", fontSize: 11,
+          fontFamily: TOKENS.fontMono, fontWeight: 500,
+          background: TOKENS.surface, color: TOKENS.textMid,
+          border: `1px solid ${TOKENS.line}`, borderRadius: 6,
           cursor: namespaces.length ? "pointer" : "not-allowed", opacity: namespaces.length ? 1 : 0.4,
         }}>
-          <Icon d={Icons.terminal} size={12} color="#fff" />
+          <Icon d={Icons.terminal} size={12} color={TOKENS.textDim} />
           コマンド生成
         </button>
       </div>
@@ -1291,10 +1291,6 @@ export default function NetnsVisualizer() {
       {modal?.type === "addNs" && (
         <Modal title="Add Namespace" onClose={() => setModal(null)}>
           <Input label="Name" value={modal.data.name} onChange={v => setModal({...modal, data:{...modal.data, name:v}})} mono placeholder="ns-name" />
-          <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
-            {NS_COLORS.map(c => <div key={c} onClick={() => setModal({...modal, data:{...modal.data, color:c}})}
-              style={{ width: 24, height: 24, borderRadius: 6, background: c, cursor: "pointer", border: modal.data.color === c ? "2px solid #fff" : "2px solid transparent" }} />)}
-          </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
             <Btn ghost small onClick={() => setModal(null)}>キャンセル</Btn>
             <Btn small onClick={confirmModal}>追加</Btn>

@@ -16,6 +16,7 @@ import { Modal } from "./ui/primitives/Modal.jsx";
 import { RouteModal } from "./ui/modals/RouteModal.jsx";
 import { ArpModal } from "./ui/modals/ArpModal.jsx";
 import { MacTableModal } from "./ui/modals/MacTableModal.jsx";
+import { BridgeAddModal } from "./ui/modals/BridgeAddModal.jsx";
 import { IfaceModal } from "./ui/modals/IfaceModal.jsx";
 import { VlanModal } from "./ui/modals/VlanModal.jsx";
 import { BridgeVlanModal } from "./ui/modals/BridgeVlanModal.jsx";
@@ -800,7 +801,7 @@ export default function NetnsVisualizer() {
 
   /* ── Add operations ── */
   const addNs = () => { const i = namespaces.length; setModal({ type: "addNs", data: { name: `ns${i+1}` } }); };
-  const addBridge = () => setModal({ type: "addBridge", data: { name: `br${bridges.length}`, nsId: namespaces[0]?.id||"", ip: "" } });
+  const addBridge = () => setModal({ type: "addBridge", data: { name: `br${bridges.length}`, nsId: namespaces[0]?.id||"", ip: "", vlanFiltering: true } });
   const addVeth = () => { const i = veths.length+1; setModal({ type: "addVeth", data: { name: `veth-pair-${i}`, endAName: `veth${i}a`, endANs: namespaces[0]?.id||"", endAIp: "", endAMac: "", endABridge: "", endBName: `veth${i}b`, endBNs: namespaces[1]?.id||namespaces[0]?.id||"", endBIp: "", endBMac: "", endBBridge: "" } }); };
   const addRoute = () => setModal({ type: "addRoute", data: { nsId: namespaces[0]?.id||"", dest: "", gateway: "", iface: "" } });
   const addCommand = () => setModal({ type: "addCommand", data: { nsId: namespaces[0]?.id||"", cmds: "" } });
@@ -829,8 +830,9 @@ export default function NetnsVisualizer() {
         let r = await execAndLog(`${p} ip link add ${data.name} type bridge`); if (!r.success) { alert(`Failed: ${r.output}`); return; }
         await execAndLog(`${p} ip link set ${data.name} up`);
         if (data.ip) await execAndLog(`${p} ip addr add ${data.ip} dev ${data.name}`);
+        if (data.vlanFiltering) await execAndLog(`${p} ip link set ${data.name} type bridge vlan_filtering 1`);
       }
-      update(s => s.bridges.push({ id: uid(), name: data.name, nsId: data.nsId, ip: data.ip, vlanFiltering: false }));
+      update(s => s.bridges.push({ id: uid(), name: data.name, nsId: data.nsId, ip: data.ip, vlanFiltering: !!data.vlanFiltering }));
     } else if (type === "addVeth") {
       if (!validateCidr(data.endAIp) || !validateCidr(data.endBIp)) { alert(CIDR_ERROR_MSG); return; }
       if (dockerReady) {
@@ -1299,15 +1301,13 @@ export default function NetnsVisualizer() {
       )}
 
       {modal?.type === "addBridge" && (
-        <Modal title="Add Bridge" onClose={() => setModal(null)}>
-          <Input label="Name" value={modal.data.name} onChange={v => setModal({...modal, data:{...modal.data, name:v}})} mono />
-          <Select label="Namespace" value={modal.data.nsId} onChange={v => setModal({...modal, data:{...modal.data, nsId:v}})} options={nsOptions} />
-          <Input label="IP Address" value={modal.data.ip} onChange={v => setModal({...modal, data:{...modal.data, ip:v}})} mono placeholder="10.0.0.1/24" />
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <Btn ghost small onClick={() => setModal(null)}>キャンセル</Btn>
-            <Btn small color={COLORS.green} onClick={confirmModal}>追加</Btn>
-          </div>
-        </Modal>
+        <BridgeAddModal
+          data={modal.data}
+          setData={d => setModal({ ...modal, data: d })}
+          onCancel={() => setModal(null)}
+          onConfirm={confirmModal}
+          namespaces={namespaces}
+        />
       )}
 
       {modal?.type === "addVeth" && (

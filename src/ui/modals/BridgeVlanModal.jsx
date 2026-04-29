@@ -1,90 +1,167 @@
-import { COLORS } from "../../theme.js";
-import { Btn } from "../primitives/Btn.jsx";
-import { Input } from "../primitives/Input.jsx";
-import { Modal } from "../primitives/Modal.jsx";
+import { TOKENS as T } from "../../theme.js";
+import { AddModalShell, Field, TextInput, Separator, M } from "./addModalParts.jsx";
+
+const Chip = ({ color, children }) => (
+  <span style={{
+    padding: '2px 6px', fontSize: 9.5, fontFamily: T.fontMono, fontWeight: 600,
+    letterSpacing: '0.05em', color, background: color + '22', borderRadius: 3,
+  }}>
+    {children}
+  </span>
+);
+
+const RadioGroup = ({ value, onChange, options }) => (
+  <div style={{ display: 'flex', gap: 16 }}>
+    {options.map(o => (
+      <label key={o.value} onClick={() => onChange(o.value)} style={{
+        display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+        fontSize: 12, fontFamily: T.fontMono, fontWeight: 500,
+        color: value === o.value ? M.cyan : M.textDim,
+      }}>
+        <div style={{
+          width: 16, height: 16, borderRadius: 8, flexShrink: 0,
+          border: `2px solid ${value === o.value ? M.cyan : M.lineHi}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          {value === o.value && <div style={{ width: 8, height: 8, borderRadius: 4, background: M.cyan }} />}
+        </div>
+        {o.label}
+      </label>
+    ))}
+  </div>
+);
+
+const ToggleRow = ({ checked, onChange, label }) => (
+  <label onClick={() => onChange(!checked)} style={{
+    display: 'flex', alignItems: 'center', gap: 10,
+    padding: '10px 12px', background: M.bg,
+    border: `1px solid ${M.lineSoft}`, borderRadius: 6,
+    cursor: 'pointer', marginBottom: 8,
+  }}>
+    <div style={{
+      width: 30, height: 18, borderRadius: 10, flexShrink: 0,
+      background: checked ? M.cyan : M.surfaceHi,
+      position: 'relative', transition: 'background 0.15s',
+    }}>
+      <div style={{
+        width: 14, height: 14, borderRadius: 7, background: '#fff',
+        position: 'absolute', top: 2, left: checked ? 14 : 2,
+        transition: 'left 0.15s', boxShadow: '0 1px 2px rgba(0,0,0,0.3)',
+      }} />
+    </div>
+    <span style={{ fontSize: 11, color: M.textMid, fontFamily: T.fontMono }}>{label}</span>
+  </label>
+);
+
+const CheckboxPair = ({ label1, checked1, onChange1, label2, checked2, onChange2 }) => (
+  <div style={{ display: 'flex', gap: 16, marginBottom: 8 }}>
+    {[[label1, checked1, onChange1], [label2, checked2, onChange2]].map(([label, checked, onChange], i) => (
+      <label key={i} onClick={() => onChange(!checked)} style={{
+        display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+        fontSize: 11, color: M.textMid, fontFamily: T.fontMono,
+      }}>
+        <div style={{
+          width: 14, height: 14, borderRadius: 3, flexShrink: 0,
+          background: checked ? M.cyan : 'transparent',
+          border: `1.5px solid ${checked ? M.cyan : M.lineHi}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          {checked && <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7"/></svg>}
+        </div>
+        {label}
+      </label>
+    ))}
+  </div>
+);
 
 export const BridgeVlanModal = ({ bridgeVlanModal, setBridgeVlanModal, bridgeVlans, deleteBridgeVlan, applyPortMode }) => {
+  const existing = bridgeVlans.filter(bv => bv.bridgeId === bridgeVlanModal.bridgeId && bv.dev === bridgeVlanModal.dev);
+  const set = (k, v) => setBridgeVlanModal({ ...bridgeVlanModal, [k]: v });
+
   return (
-    <Modal title={`VLAN設定: ${bridgeVlanModal.dev} (${bridgeVlanModal.bridgeName})`} onClose={() => setBridgeVlanModal(null)} width={480}>
-      <div style={{ marginBottom: 16 }}>
-        <span style={{ display: "block", fontSize: 11, color: COLORS.textMuted, marginBottom: 8, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.05em", textTransform: "uppercase" }}>ポートモード</span>
-        <div style={{ display: "flex", gap: 12 }}>
-          {['access', 'trunk', 'custom'].map(mode => (
-            <label key={mode} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 12, color: bridgeVlanModal.portMode === mode ? COLORS.cyan : COLORS.textMuted, fontFamily: "'JetBrains Mono', monospace" }}>
-              <input type="radio" name="portMode" checked={bridgeVlanModal.portMode === mode}
-                onChange={() => setBridgeVlanModal({...bridgeVlanModal, portMode: mode})}
-                style={{ accentColor: COLORS.cyan }} />
-              {mode === 'access' ? 'Access' : mode === 'trunk' ? 'Trunk' : 'Custom'}
-            </label>
-          ))}
-        </div>
-      </div>
+    <AddModalShell
+      width={520}
+      icon={
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+          <rect x="2" y="4" width="12" height="8" rx="2" stroke={T.magenta} strokeWidth="1.5" />
+          <line x1="5" y1="7" x2="11" y2="7" stroke={T.magenta} strokeWidth="1.3" strokeLinecap="round" />
+          <line x1="5" y1="9.5" x2="11" y2="9.5" stroke={T.magenta} strokeWidth="1.3" strokeLinecap="round" />
+        </svg>
+      }
+      iconColor={T.magenta} iconBg={T.magentaSoft}
+      title="VLAN 設定" subtitle={`${bridgeVlanModal.dev} (${bridgeVlanModal.bridgeName})`}
+      onCancel={() => setBridgeVlanModal(null)}
+      onConfirm={applyPortMode}
+      confirmLabel="設定"
+    >
+      <Field label="ポートモード">
+        <RadioGroup
+          value={bridgeVlanModal.portMode}
+          onChange={v => set('portMode', v)}
+          options={[
+            { value: 'access', label: 'Access' },
+            { value: 'trunk', label: 'Trunk' },
+            { value: 'custom', label: 'Custom' },
+          ]}
+        />
+      </Field>
 
       {bridgeVlanModal.portMode === 'access' && (
-        <Input label="VLAN ID" value={bridgeVlanModal.accessVid}
-          onChange={v => setBridgeVlanModal({...bridgeVlanModal, accessVid: v})} mono placeholder="100" />
+        <Field label="VLAN ID">
+          <TextInput value={bridgeVlanModal.accessVid} onChange={v => set('accessVid', v)} placeholder="100" />
+        </Field>
       )}
 
-      {bridgeVlanModal.portMode === 'trunk' && (<>
-        <Input label="VLAN IDs (カンマ区切り)" value={bridgeVlanModal.trunkVids}
-          onChange={v => setBridgeVlanModal({...bridgeVlanModal, trunkVids: v})} mono placeholder="10,20,30" />
-        <Input label="ネイティブVLAN (任意)" value={bridgeVlanModal.trunkNativeVid}
-          onChange={v => setBridgeVlanModal({...bridgeVlanModal, trunkNativeVid: v})} mono placeholder="10" />
-        <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: COLORS.textMuted, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
-            <input type="checkbox" checked={bridgeVlanModal.removeDefaultVlan}
-              onChange={e => setBridgeVlanModal({...bridgeVlanModal, removeDefaultVlan: e.target.checked})} />
-            デフォルトVLAN(1)を除去
-          </label>
-          <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: COLORS.textMuted, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
-            <input type="checkbox" checked={bridgeVlanModal.applySelf}
-              onChange={e => setBridgeVlanModal({...bridgeVlanModal, applySelf: e.target.checked})} />
-            ブリッジ自体(self)にも設定
-          </label>
-        </div>
-      </>)}
+      {bridgeVlanModal.portMode === 'trunk' && (
+        <>
+          <Field label="VLAN IDs" hint="カンマ区切り">
+            <TextInput value={bridgeVlanModal.trunkVids} onChange={v => set('trunkVids', v)} placeholder="10,20,30" />
+          </Field>
+          <Field label="ネイティブ VLAN" hint="（任意）">
+            <TextInput value={bridgeVlanModal.trunkNativeVid} onChange={v => set('trunkNativeVid', v)} placeholder="10" />
+          </Field>
+          <ToggleRow checked={bridgeVlanModal.removeDefaultVlan} onChange={v => set('removeDefaultVlan', v)} label="デフォルト VLAN(1) を除去" />
+          <ToggleRow checked={bridgeVlanModal.applySelf} onChange={v => set('applySelf', v)} label="ブリッジ自体 (self) にも設定" />
+        </>
+      )}
 
-      {bridgeVlanModal.portMode === 'custom' && (<>
-        <Input label="VID" value={bridgeVlanModal.newVid}
-          onChange={v => setBridgeVlanModal({...bridgeVlanModal, newVid: v})} mono placeholder="100" />
-        <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: COLORS.textMuted, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
-            <input type="checkbox" checked={bridgeVlanModal.newPvid}
-              onChange={e => setBridgeVlanModal({...bridgeVlanModal, newPvid: e.target.checked})} />
-            PVID
-          </label>
-          <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: COLORS.textMuted, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
-            <input type="checkbox" checked={bridgeVlanModal.newUntagged}
-              onChange={e => setBridgeVlanModal({...bridgeVlanModal, newUntagged: e.target.checked})} />
-            Untagged
-          </label>
-        </div>
-      </>)}
+      {bridgeVlanModal.portMode === 'custom' && (
+        <>
+          <Field label="VID">
+            <TextInput value={bridgeVlanModal.newVid} onChange={v => set('newVid', v)} placeholder="100" />
+          </Field>
+          <CheckboxPair
+            label1="PVID" checked1={bridgeVlanModal.newPvid} onChange1={v => set('newPvid', v)}
+            label2="Untagged" checked2={bridgeVlanModal.newUntagged} onChange2={v => set('newUntagged', v)}
+          />
+        </>
+      )}
 
-      {/* Current VLAN entries */}
-      {(() => {
-        const existing = bridgeVlans.filter(bv => bv.bridgeId === bridgeVlanModal.bridgeId && bv.dev === bridgeVlanModal.dev);
-        if (!existing.length) return null;
-        return (
-          <div style={{ marginBottom: 12 }}>
-            <span style={{ display: "block", fontSize: 11, color: COLORS.textMuted, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.05em", textTransform: "uppercase" }}>現在の設定</span>
-            {existing.map(bv => (
-              <div key={bv.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", background: COLORS.bg, borderRadius: 4, marginBottom: 4, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
-                <span style={{ color: COLORS.text }}>VID {bv.vid}</span>
-                {bv.pvid && <span style={{ color: COLORS.cyan, fontSize: 9, background: COLORS.cyan+"20", padding: "1px 4px", borderRadius: 3 }}>PVID</span>}
-                {bv.untagged && <span style={{ color: COLORS.green, fontSize: 9, background: COLORS.green+"20", padding: "1px 4px", borderRadius: 3 }}>Untag</span>}
+      {existing.length > 0 && (
+        <>
+          <Separator />
+          <div style={{ fontSize: 10.5, fontFamily: T.fontMono, letterSpacing: '0.1em', textTransform: 'uppercase', color: M.textDim, fontWeight: 600, marginBottom: 8 }}>
+            現在の設定
+          </div>
+          <div style={{ background: M.bg, border: `1px solid ${M.lineSoft}`, borderRadius: 6, overflow: 'hidden' }}>
+            {existing.map((bv, i) => (
+              <div key={bv.id} style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '8px 12px',
+                borderBottom: i < existing.length - 1 ? `1px solid ${M.lineSoft}` : 'none',
+                fontSize: 11.5, fontFamily: T.fontMono,
+              }}>
+                <span style={{ color: M.text, fontWeight: 500, minWidth: 60 }}>VID {bv.vid}</span>
+                {bv.pvid && <Chip color={M.cyan}>PVID</Chip>}
+                {bv.untagged && <Chip color={T.green}>Untag</Chip>}
+                {!bv.pvid && !bv.untagged && <Chip color={M.textDim}>TAGGED</Chip>}
                 <span style={{ flex: 1 }} />
-                <span onClick={() => deleteBridgeVlan(bv.id)} style={{ color: COLORS.red, cursor: "pointer", fontSize: 10 }}>✕</span>
+                <span onClick={() => deleteBridgeVlan(bv.id)} style={{ color: T.red, cursor: 'pointer', fontSize: 12, opacity: 0.7 }}>✕</span>
               </div>
             ))}
           </div>
-        );
-      })()}
-
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <Btn ghost small onClick={() => setBridgeVlanModal(null)}>閉じる</Btn>
-        <Btn small color={COLORS.cyan} onClick={applyPortMode}>設定</Btn>
-      </div>
-    </Modal>
+        </>
+      )}
+    </AddModalShell>
   );
 };

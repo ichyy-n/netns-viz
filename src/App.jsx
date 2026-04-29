@@ -17,6 +17,10 @@ import { RouteModal } from "./ui/modals/RouteModal.jsx";
 import { ArpModal } from "./ui/modals/ArpModal.jsx";
 import { MacTableModal } from "./ui/modals/MacTableModal.jsx";
 import { BridgeAddModal } from "./ui/modals/BridgeAddModal.jsx";
+import { NsAddModal } from "./ui/modals/NsAddModal.jsx";
+import { VethAddModal } from "./ui/modals/VethAddModal.jsx";
+import { RouteAddModal } from "./ui/modals/RouteAddModal.jsx";
+import { CommandAddModal } from "./ui/modals/CommandAddModal.jsx";
 import { IfaceModal } from "./ui/modals/IfaceModal.jsx";
 import { VlanModal } from "./ui/modals/VlanModal.jsx";
 import { BridgeVlanModal } from "./ui/modals/BridgeVlanModal.jsx";
@@ -51,8 +55,8 @@ export default function NetnsVisualizer() {
   const [terminalTabs, setTerminalTabs] = useState([]);
   const [activeTermTab, setActiveTermTab] = useState(null);
   const [showTerminal, setShowTerminal] = useState(false);
+  const [dockMaximized, setDockMaximized] = useState(false);
   const [execLog, setExecLog] = useState([]);
-  const [showLog, setShowLog] = useState(false);
   const [routeModal, setRouteModal] = useState(null);
   const [macTableModal, setMacTableModal] = useState(null);
   const [macTableShowAll, setMacTableShowAll] = useState(false);
@@ -369,6 +373,7 @@ export default function NetnsVisualizer() {
       nsId: ns.id,
       nsName: ns.name,
       color: roleColor,
+      role,
       label: count === 0 ? ns.name : `${ns.name} (${count + 1})`,
     }]);
     setActiveTermTab(tabId);
@@ -393,8 +398,7 @@ export default function NetnsVisualizer() {
     }
     setTerminalTabs(prev => {
       const next = prev.filter(t => t.tabId !== tabId);
-      if (activeTermTab === tabId) setActiveTermTab(next.length ? next[next.length - 1].tabId : null);
-      if (!next.length) setShowTerminal(false);
+      if (activeTermTab === tabId) setActiveTermTab(next.length ? next[next.length - 1].tabId : '__log__');
       return next;
     });
   }, [activeTermTab]);
@@ -923,8 +927,7 @@ export default function NetnsVisualizer() {
     // 該当nsのターミナルを全部閉じる
     setTerminalTabs(prev => {
       const next = prev.filter(t => t.nsId !== id);
-      if (!next.length) setShowTerminal(false);
-      else if (!next.find(t => t.tabId === activeTermTab)) setActiveTermTab(next[next.length - 1].tabId);
+      if (!next.find(t => t.tabId === activeTermTab)) setActiveTermTab(next.length ? next[next.length - 1].tabId : '__log__');
       return next;
     });
     setSelected(null);
@@ -1106,10 +1109,13 @@ export default function NetnsVisualizer() {
             読込
           </button>
         </>)}
-        <button onClick={() => setShowLog(!showLog)} style={{
+        <button onClick={() => {
+          if (showTerminal && activeTermTab === '__log__') setShowTerminal(false);
+          else { setShowTerminal(true); setActiveTermTab('__log__'); }
+        }} style={{
           display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", fontSize: 11,
           fontFamily: TOKENS.fontMono, fontWeight: 500,
-          background: showLog ? TOKENS.surface : "transparent",
+          background: showTerminal && activeTermTab === '__log__' ? TOKENS.surface : "transparent",
           color: TOKENS.textMid, border: "none", borderRadius: 5, cursor: "pointer",
         }}>
           <Icon d={Icons.code} size={11} color={TOKENS.textDim} />
@@ -1129,8 +1135,8 @@ export default function NetnsVisualizer() {
       </div>
 
       {/* ── Main Area ── */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", paddingBottom: !showTerminal ? 28 : 0 }}>
+        <div style={{ flex: dockMaximized && showTerminal ? 0 : 1, display: dockMaximized && showTerminal ? "none" : "flex", overflow: "hidden" }}>
 
           {/* ── Canvas ── */}
           <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
@@ -1232,56 +1238,93 @@ export default function NetnsVisualizer() {
             />
           )}
 
-          {/* ── Exec Log Panel ── */}
-          {showLog && (
-            <div style={{ width: 360, borderLeft: `1px solid ${COLORS.border}`, background: COLORS.bg, display: "flex", flexDirection: "column", flexShrink: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", borderBottom: `1px solid ${COLORS.border}` }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.cyan, fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase" }}>実行ログ</span>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <Btn small ghost onClick={() => setExecLog([])}>Clear</Btn>
-                  <Btn small ghost onClick={() => setShowLog(false)}><Icon d={Icons.x} size={10} color={COLORS.textMuted} /></Btn>
-                </div>
-              </div>
-              <div style={{ flex: 1, overflow: "auto", padding: 12 }}>
-                {!execLog.length && <div style={{ color: COLORS.textDim, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", padding: 8 }}>GUIの操作ログがここに表示されます</div>}
-                {execLog.map((e, i) => (
-                  <div key={i} style={{ marginBottom: 10, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
-                    <div style={{ color: COLORS.textDim, fontSize: 9 }}>{e.time}</div>
-                    <div style={{ color: COLORS.cyan }}>$ {e.cmd}</div>
-                    {e.output && <pre style={{ color: e.success ? COLORS.green : COLORS.red, margin: "2px 0 0 0", padding: 0, fontSize: 10, whiteSpace: "pre-wrap", wordBreak: "break-all", lineHeight: 1.4 }}>{e.output}</pre>}
-                  </div>
-                ))}
-                <div ref={logEndRef} />
-              </div>
-            </div>
-          )}
         </div>
 
-        {/* ── Terminal Panel (bottom) ── */}
-        {showTerminal && terminalTabs.length > 0 && (
-          <div style={{ height: 260, borderTop: `1px solid ${COLORS.border}`, background: COLORS.bg, display: "flex", flexDirection: "column", flexShrink: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 0, borderBottom: `1px solid ${COLORS.border}`, background: COLORS.surface, flexShrink: 0, overflow: "auto" }}>
+        {/* ── Bottom Dock (実行ログ + ターミナル統合) ── */}
+        {showTerminal && (
+          <div style={{ height: dockMaximized ? "100%" : 260, flex: dockMaximized ? 1 : "none", borderTop: `1px solid ${TOKENS.line}`, background: TOKENS.surface, display: "flex", flexDirection: "column", flexShrink: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 0, borderBottom: `1px solid ${TOKENS.line}`, background: TOKENS.bg2, flexShrink: 0, overflow: "auto" }}>
+              {/* 実行ログタブ（常駐） */}
+              <div onClick={() => setActiveTermTab('__log__')}
+                style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", fontSize: 11, fontFamily: TOKENS.fontMono,
+                  cursor: "pointer", fontWeight: activeTermTab === '__log__' ? 600 : 500,
+                  color: activeTermTab === '__log__' ? TOKENS.text : TOKENS.textMid,
+                  background: activeTermTab === '__log__' ? TOKENS.surface : "transparent",
+                  borderTop: activeTermTab === '__log__' ? `2px solid ${TOKENS.indigo}` : "2px solid transparent",
+                  borderRight: `1px solid ${TOKENS.line}`,
+                  whiteSpace: "nowrap", flexShrink: 0 }}>
+                <Icon d={Icons.code} size={11} color={activeTermTab === '__log__' ? TOKENS.text : TOKENS.textMid} />
+                実行ログ
+              </div>
+              {/* ターミナルタブ */}
               {terminalTabs.map(tab => (
                 <div key={tab.tabId} onClick={() => setActiveTermTab(tab.tabId)}
-                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
-                    cursor: "pointer", fontWeight: 600, color: activeTermTab === tab.tabId ? tab.color : COLORS.textDim,
-                    background: activeTermTab === tab.tabId ? COLORS.bg : "transparent",
-                    borderBottom: activeTermTab === tab.tabId ? `2px solid ${tab.color}` : "2px solid transparent",
+                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", fontSize: 11, fontFamily: TOKENS.fontMono,
+                    cursor: "pointer", fontWeight: activeTermTab === tab.tabId ? 600 : 500,
+                    color: activeTermTab === tab.tabId ? TOKENS.text : TOKENS.textMid,
+                    background: activeTermTab === tab.tabId ? TOKENS.surface : "transparent",
+                    borderTop: activeTermTab === tab.tabId ? `2px solid ${tab.color}` : "2px solid transparent",
+                    borderRight: `1px solid ${TOKENS.line}`,
                     whiteSpace: "nowrap", flexShrink: 0 }}>
                   <span style={{ width: 6, height: 6, borderRadius: 3, background: tab.color, display: "inline-block" }} />
                   {tab.label}
-                  <span onClick={e => { e.stopPropagation(); closeTermTab(tab.tabId); }} style={{ color: COLORS.textDim, fontSize: 10, marginLeft: 4, cursor: "pointer" }}>✕</span>
+                  <span onClick={e => { e.stopPropagation(); closeTermTab(tab.tabId); }} style={{ color: TOKENS.textDim, fontSize: 10, marginLeft: 4, cursor: "pointer" }}>✕</span>
                 </div>
               ))}
               <div style={{ flex: 1 }} />
-              <Btn small ghost onClick={() => setShowTerminal(false)} style={{ marginRight: 8 }}><Icon d={Icons.x} size={10} color={COLORS.textMuted} /></Btn>
+              <div style={{ display: "flex", alignItems: "center", gap: 2, paddingLeft: 8, borderLeft: `1px solid ${TOKENS.line}`, marginRight: 8 }}>
+                <button onClick={() => setDockMaximized(m => !m)} title={dockMaximized ? "元のサイズへ" : "最大化"}
+                  style={{ width: 24, height: 24, display: "inline-flex", alignItems: "center", justifyContent: "center", color: TOKENS.textDim, background: "transparent", border: "none", borderRadius: 4, cursor: "pointer" }}>
+                  {dockMaximized
+                    ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M10 4v6H4"/><path d="M14 20v-6h6"/><path d="M14 10l6-6"/><path d="M4 20l6-6"/></svg>
+                    : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 14v6h6"/><path d="M20 10V4h-6"/><path d="M14 4l6 6"/><path d="M4 20l6-6"/></svg>}
+                </button>
+                <button onClick={() => { setShowTerminal(false); setDockMaximized(false); }} title="最小化"
+                  style={{ width: 24, height: 24, display: "inline-flex", alignItems: "center", justifyContent: "center", color: TOKENS.textDim, background: "transparent", border: "none", borderRadius: 4, cursor: "pointer" }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                </button>
+              </div>
             </div>
             <div style={{ flex: 1, overflow: "hidden" }}>
+              {/* ログペイン */}
+              {activeTermTab === '__log__' && (
+                <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 14px", borderBottom: `1px solid ${TOKENS.lineSoft}`, fontSize: 10, fontFamily: TOKENS.fontMono, color: TOKENS.textFaint, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600 }}>
+                    <span style={{ width: 60 }}>TIME</span>
+                    <span style={{ width: 38 }}>STATUS</span>
+                    <span style={{ flex: 1 }}>COMMAND</span>
+                    <Btn small ghost onClick={() => setExecLog([])}>Clear</Btn>
+                  </div>
+                  <div style={{ flex: 1, overflow: "auto", padding: '4px 0' }}>
+                    {!execLog.length && <div style={{ color: TOKENS.textDim, fontSize: 11, fontFamily: TOKENS.fontMono, padding: '8px 14px' }}>GUIの操作ログがここに表示されます</div>}
+                    {execLog.map((e, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '5px 14px', fontFamily: TOKENS.fontMono, fontSize: 11.5, lineHeight: 1.55 }}>
+                        <span style={{ color: TOKENS.textDim, width: 60, flexShrink: 0, fontSize: 11 }}>{e.time}</span>
+                        <span style={{ width: 38, flexShrink: 0 }}>
+                          <span style={{ padding: '1px 5px', fontSize: 9.5, fontFamily: TOKENS.fontMono, fontWeight: 600, letterSpacing: '0.05em', borderRadius: 3,
+                            color: e.success ? TOKENS.green : TOKENS.red,
+                            background: e.success ? TOKENS.greenSoft : TOKENS.redSoft,
+                          }}>{e.success ? 'OK' : 'ERR'}</span>
+                        </span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <span style={{ color: e.success ? TOKENS.text : TOKENS.textMid }}>
+                            <span style={{ color: TOKENS.textDim, marginRight: 6 }}>$</span>
+                            {e.cmd}
+                          </span>
+                          {e.output && <div style={{ color: e.success ? TOKENS.textDim : TOKENS.red, fontSize: 11, marginTop: 2 }}>↳ {e.output}</div>}
+                        </div>
+                      </div>
+                    ))}
+                    <div ref={logEndRef} />
+                  </div>
+                </div>
+              )}
+              {/* ターミナルペイン */}
               {terminalTabs.map(tab => (
                 <div key={tab.tabId} style={{ display: activeTermTab === tab.tabId ? "flex" : "none", height: "100%", flexDirection: "column" }}>
                   {tab.kind === 'host'
                     ? <HostTerminal tabId={tab.tabId} dockerReady={dockerReady} isElectron={isElectron} openShell={openShell} closeShell={closeShell} sendCommand={sendCommand} killSession={killSession} writeSession={writeSession} onShellData={onShellData} />
-                    : <NsTerminal tabId={tab.tabId} ns={{ id: tab.nsId, name: tab.nsName, color: tab.color }} dockerReady={dockerReady} isElectron={isElectron} openShell={openShell} closeShell={closeShell} sendCommand={sendCommand} killSession={killSession} writeSession={writeSession} onShellData={onShellData} />}
+                    : <NsTerminal tabId={tab.tabId} ns={{ id: tab.nsId, name: tab.nsName, color: tab.color, role: tab.role }} dockerReady={dockerReady} isElectron={isElectron} openShell={openShell} closeShell={closeShell} sendCommand={sendCommand} killSession={killSession} writeSession={writeSession} onShellData={onShellData} />}
                 </div>
               ))}
             </div>
@@ -1289,15 +1332,38 @@ export default function NetnsVisualizer() {
         )}
       </div>
 
+      {/* ── Minimized Dock Bar ── */}
+      {!showTerminal && (
+        <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, height: 28, display: "flex", alignItems: "center", padding: "0 8px", background: TOKENS.bg2, borderTop: `1px solid ${TOKENS.line}`, gap: 4, zIndex: 5 }}>
+          <button onClick={() => { setShowTerminal(true); setActiveTermTab('__log__'); }}
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 8px", height: 20, fontFamily: TOKENS.fontMono, fontSize: 10.5, color: TOKENS.textMid, background: "transparent", border: "none", cursor: "pointer", borderRadius: 3 }}>
+            <Icon d={Icons.code} size={11} color={TOKENS.textDim} />
+            実行ログ
+          </button>
+          {terminalTabs.map(t => (
+            <button key={t.tabId} onClick={() => { setShowTerminal(true); setActiveTermTab(t.tabId); }}
+              style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 8px", height: 20, fontFamily: TOKENS.fontMono, fontSize: 10.5, color: TOKENS.textMid, background: "transparent", border: "none", cursor: "pointer", borderRadius: 3 }}>
+              <span style={{ width: 5, height: 5, borderRadius: 3, background: t.color, display: "inline-block" }} />
+              {t.label}
+            </button>
+          ))}
+          <div style={{ flex: 1 }} />
+          <button onClick={() => setShowTerminal(true)}
+            style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", height: 20, fontFamily: TOKENS.fontMono, fontSize: 10.5, color: TOKENS.textDim, background: "transparent", border: "none", cursor: "pointer" }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="m6 15 6-6 6 6"/></svg>
+            開く
+          </button>
+        </div>
+      )}
+
       {/* ── Modals ── */}
       {modal?.type === "addNs" && (
-        <Modal title="Add Namespace" onClose={() => setModal(null)}>
-          <Input label="Name" value={modal.data.name} onChange={v => setModal({...modal, data:{...modal.data, name:v}})} mono placeholder="ns-name" />
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <Btn ghost small onClick={() => setModal(null)}>キャンセル</Btn>
-            <Btn small onClick={confirmModal}>追加</Btn>
-          </div>
-        </Modal>
+        <NsAddModal
+          data={modal.data}
+          setData={d => setModal({ ...modal, data: d })}
+          onCancel={() => setModal(null)}
+          onConfirm={confirmModal}
+        />
       )}
 
       {modal?.type === "addBridge" && (
@@ -1311,61 +1377,35 @@ export default function NetnsVisualizer() {
       )}
 
       {modal?.type === "addVeth" && (
-        <Modal title="Add Veth Pair" onClose={() => setModal(null)} width={500}>
-          <Input label="Pair Name" value={modal.data.name} onChange={v => setModal({...modal, data:{...modal.data, name:v}})} mono />
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-            <div>
-              <div style={{ fontSize: 10, color: COLORS.orange, fontWeight: 700, marginBottom: 8, fontFamily: "'JetBrains Mono', monospace" }}>END A</div>
-              <Input label="Interface Name" value={modal.data.endAName} onChange={v => setModal({...modal, data:{...modal.data, endAName:v}})} mono />
-              <Select label="Namespace" value={modal.data.endANs} onChange={v => setModal({...modal, data:{...modal.data, endANs:v}})} options={nsOptions} />
-              <Input label="IP Address" value={modal.data.endAIp} onChange={v => setModal({...modal, data:{...modal.data, endAIp:v}})} mono placeholder="10.0.0.2/24" />
-              <Input label="MAC Address (任意)" value={modal.data.endAMac} onChange={v => setModal({...modal, data:{...modal.data, endAMac:v}})} mono placeholder="aa:bb:cc:dd:ee:f1" />
-              <Select label="Bridge" value={modal.data.endABridge} onChange={v => setModal({...modal, data:{...modal.data, endABridge:v}})} options={bridgeOptions(modal.data.endANs)} />
-            </div>
-            <div>
-              <div style={{ fontSize: 10, color: COLORS.orange, fontWeight: 700, marginBottom: 8, fontFamily: "'JetBrains Mono', monospace" }}>END B</div>
-              <Input label="Interface Name" value={modal.data.endBName} onChange={v => setModal({...modal, data:{...modal.data, endBName:v}})} mono />
-              <Select label="Namespace" value={modal.data.endBNs} onChange={v => setModal({...modal, data:{...modal.data, endBNs:v}})} options={nsOptions} />
-              <Input label="IP Address" value={modal.data.endBIp} onChange={v => setModal({...modal, data:{...modal.data, endBIp:v}})} mono placeholder="10.0.0.3/24" />
-              <Input label="MAC Address (任意)" value={modal.data.endBMac} onChange={v => setModal({...modal, data:{...modal.data, endBMac:v}})} mono placeholder="aa:bb:cc:dd:ee:f2" />
-              <Select label="Bridge" value={modal.data.endBBridge} onChange={v => setModal({...modal, data:{...modal.data, endBBridge:v}})} options={bridgeOptions(modal.data.endBNs)} />
-            </div>
-          </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
-            <Btn ghost small onClick={() => setModal(null)}>キャンセル</Btn>
-            <Btn small color={COLORS.orange} onClick={confirmModal}>追加</Btn>
-          </div>
-        </Modal>
+        <VethAddModal
+          data={modal.data}
+          setData={d => setModal({ ...modal, data: d })}
+          onCancel={() => setModal(null)}
+          onConfirm={confirmModal}
+          namespaces={namespaces}
+          bridges={bridges}
+          bridgeOptions={bridgeOptions}
+        />
       )}
 
       {modal?.type === "addRoute" && (
-        <Modal title="Add Route" onClose={() => setModal(null)}>
-          <Select label="Namespace" value={modal.data.nsId} onChange={v => setModal({...modal, data:{...modal.data, nsId:v}})} options={nsOptions} />
-          <Input label="Destination" value={modal.data.dest} onChange={v => setModal({...modal, data:{...modal.data, dest:v}})} mono placeholder="default or 192.168.1.0/24" />
-          <Input label="Gateway" value={modal.data.gateway} onChange={v => setModal({...modal, data:{...modal.data, gateway:v}})} mono placeholder="10.0.0.1（省略可）" />
-          <Input label="Interface (optional)" value={modal.data.iface} onChange={v => setModal({...modal, data:{...modal.data, iface:v}})} mono placeholder="veth0（省略可）" />
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <Btn ghost small onClick={() => setModal(null)}>キャンセル</Btn>
-            <Btn small color={COLORS.purple} onClick={confirmModal}>追加</Btn>
-          </div>
-        </Modal>
+        <RouteAddModal
+          data={modal.data}
+          setData={d => setModal({ ...modal, data: d })}
+          onCancel={() => setModal(null)}
+          onConfirm={confirmModal}
+          namespaces={namespaces}
+        />
       )}
 
       {modal?.type === "addCommand" && (
-        <Modal title="Add Commands" onClose={() => setModal(null)}>
-          <Select label="Namespace" value={modal.data.nsId} onChange={v => setModal({...modal, data:{...modal.data, nsId:v}})} options={nsOptions} />
-          <div style={{ marginBottom: 8 }}>
-            <label style={{ fontSize: 11, color: COLORS.textMuted, display: "block", marginBottom: 4 }}>Commands (1行1コマンド)</label>
-            <textarea value={modal.data.cmds} onChange={e => setModal({...modal, data:{...modal.data, cmds: e.target.value}})}
-              placeholder={"iptables -A FORWARD -j ACCEPT\ntcpdump -i veth1a -w /tmp/cap.pcap"} rows={6}
-              style={{ width: "100%", boxSizing: "border-box", background: COLORS.surface, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: 8, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", resize: "vertical" }} />
-          </div>
-          <div style={{ fontSize: 10, color: COLORS.textDim, marginBottom: 12 }}>※ 各コマンドは ip netns exec NS_NAME を付けて実行されます</div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <Btn ghost small onClick={() => setModal(null)}>キャンセル</Btn>
-            <Btn small color={COLORS.cyan} onClick={confirmModal} disabled={!modal.data.cmds.trim()}>追加</Btn>
-          </div>
-        </Modal>
+        <CommandAddModal
+          data={modal.data}
+          setData={d => setModal({ ...modal, data: d })}
+          onCancel={() => setModal(null)}
+          onConfirm={confirmModal}
+          namespaces={namespaces}
+        />
       )}
 
       {routeModal && (

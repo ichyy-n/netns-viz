@@ -1,24 +1,37 @@
-import { COLORS } from "../../theme.js";
-import { Btn } from "../primitives/Btn.jsx";
-import { Input } from "../primitives/Input.jsx";
-import { Modal } from "../primitives/Modal.jsx";
+import { TOKENS as T } from "../../theme.js";
+import { AddModalShell, Field, TextInput, Separator, M } from "./addModalParts.jsx";
 
-export const IfaceModal = ({ ifaceModal, setIfaceModal, deleteIfaceIp, changeIface }) => {
-  return (
-    <Modal title={`インターフェース設定: ${ifaceModal.ifaceName}`} onClose={() => setIfaceModal(null)} width={420}>
-      <div style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 12, fontFamily: "'JetBrains Mono', monospace", display: "flex", alignItems: "center", gap: 8 }}>
-        <span>現在のIP: <span style={{ color: COLORS.text }}>{ifaceModal.currentIp || '(未設定)'}</span></span>
+export const IfaceModal = ({ ifaceModal, setIfaceModal, deleteIfaceIp, changeIface }) => (
+  <AddModalShell
+    width={460}
+    icon="⟷" iconColor={T.amber} iconBg={T.amberSoft}
+    title={`${ifaceModal.ifaceName} を編集`} subtitle="ip addr / ip link set"
+    onCancel={() => setIfaceModal(null)}
+    onConfirm={changeIface}
+    confirmLabel="変更"
+    confirmDisabled={!ifaceModal.newIp && !ifaceModal.newMac}
+  >
+    <Field label="現在の IP">
+      <div style={{ fontSize: 13, color: M.text, fontFamily: T.fontMono, padding: '10px 12px', background: M.bg, border: `1px solid ${M.line}`, borderRadius: 6 }}>
+        {ifaceModal.currentIp || '(未設定)'}
       </div>
-      <Input label="新しいIPアドレス (CIDR)" value={ifaceModal.newIp} onChange={v => setIfaceModal({...ifaceModal, newIp: v})} mono placeholder="192.168.1.1/24" />
-      <div style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 12, fontFamily: "'JetBrains Mono', monospace" }}>
-        現在のMAC: <span style={{ color: COLORS.text }}>{ifaceModal.currentMac || '(未取得)'}</span>
+    </Field>
+    <Field label="新しい IP アドレス" hint="（CIDR）">
+      <TextInput value={ifaceModal.newIp} onChange={v => setIfaceModal({ ...ifaceModal, newIp: v })} placeholder="192.168.1.1/24" />
+    </Field>
+
+    <Separator />
+
+    <Field label="現在の MAC">
+      <div style={{ fontSize: 13, color: M.text, fontFamily: T.fontMono, padding: '10px 12px', background: M.bg, border: `1px solid ${M.line}`, borderRadius: 6 }}>
+        {ifaceModal.currentMac || '(未取得)'}
       </div>
-      <Input label="新しいMACアドレス" value={ifaceModal.newMac} onChange={v => setIfaceModal({...ifaceModal, newMac: v})} mono placeholder="aa:bb:cc:dd:ee:ff" />
-      <div style={{ fontSize: 10, color: COLORS.textDim, marginBottom: 12 }}>※ MAC変更時はインターフェースを一時的にdownします</div>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <Btn ghost small onClick={() => setIfaceModal(null)}>キャンセル</Btn>
-        <Btn small color={COLORS.orange} onClick={changeIface} disabled={!ifaceModal.newIp && !ifaceModal.newMac}>変更</Btn>
+    </Field>
+    <Field label="新しい MAC アドレス" hint="（任意）">
+      <TextInput value={ifaceModal.newMac} onChange={v => setIfaceModal({ ...ifaceModal, newMac: v })} placeholder="aa:bb:cc:dd:ee:ff" />
+      <div style={{ fontSize: 10, color: M.textDim, fontFamily: T.fontMono, marginTop: 4 }}>
+        MAC 変更時はインターフェースを一時的に down します
       </div>
-    </Modal>
-  );
-};
+    </Field>
+  </AddModalShell>
+);

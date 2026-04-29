@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { COLORS } from "../../theme.js";
+import { COLORS, TOKENS } from "../../theme.js";
 
 export const HostTerminal = ({ tabId, dockerReady, isElectron, openShell, closeShell, sendCommand, killSession, writeSession, onShellData }) => {
   const [history, setHistory] = useState([]);
@@ -122,7 +122,7 @@ export const HostTerminal = ({ tabId, dockerReady, isElectron, openShell, closeS
         ))}
         <div ref={endRef} />
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderTop: `1px solid ${COLORS.border}`, background: COLORS.surface }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderTop: `1px solid ${TOKENS.line}`, background: TOKENS.bg2 }}>
         <span style={{ color: COLORS.cyan, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>$</span>
         <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={onKeyDown}
           placeholder={!shellReady ? "シェル未接続..." : running ? "実行中... (Ctrl+C で中断)" : "コンテナホストコマンドを入力..."} disabled={!dockerReady || !shellReady}

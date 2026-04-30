@@ -165,7 +165,7 @@ export const NamespaceNode = ({
               )}
               {/* mac */}
               {item.mac && (
-                <text x={ns.x + w - 14} y={lowerTextY} textAnchor="end" fill={T.textDim} dominantBaseline="middle"
+                <text x={ns.x + w - 14} y={lowerTextY + 2} textAnchor="end" fill={T.textDim} dominantBaseline="middle"
                   fontSize={9} fontFamily={T.fontMono}>
                   {item.mac}
                 </text>
@@ -173,9 +173,9 @@ export const NamespaceNode = ({
               {/* vlan/trunk badge */}
               {item.vids && item.vids.length > 1 && (
                 <g>
-                  <rect x={ns.x + 24} y={rowY + 20} width={40} height={13} rx={3}
+                  <rect x={ns.x + 24} y={rowY + 22} width={40} height={13} rx={3}
                     fill="none" stroke={T.magenta} strokeWidth={1} opacity={0.6} />
-                  <text x={ns.x + 28} y={rowY + 30} textAnchor="start"
+                  <text x={ns.x + 28} y={rowY + 32} textAnchor="start"
                     fill={T.magenta} fontSize={8} fontFamily={T.fontMono} fontWeight={500}>
                     TRUNK
                   </text>
@@ -183,9 +183,9 @@ export const NamespaceNode = ({
               )}
               {item.vids && item.vids.length === 1 && (
                 <g>
-                  <rect x={ns.x + 24} y={rowY + 20} width={48} height={13} rx={3}
+                  <rect x={ns.x + 24} y={rowY + 22} width={48} height={13} rx={3}
                     fill="none" stroke={T.sky} strokeWidth={1} opacity={0.6} />
-                  <text x={ns.x + 28} y={rowY + 30} textAnchor="start"
+                  <text x={ns.x + 28} y={rowY + 32} textAnchor="start"
                     fill={T.sky} fontSize={8} fontFamily={T.fontMono} fontWeight={500}>
                     VLAN {item.vids[0]}
                   </text>

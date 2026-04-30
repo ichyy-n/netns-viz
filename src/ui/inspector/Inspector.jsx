@@ -19,6 +19,21 @@ const Badge = ({ color, children }) => (
   }}>{children}</span>
 );
 
+const TerminalIcon = ({ size = 14 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m4 7 5 5-5 5" />
+    <path d="M12 17h8" />
+  </svg>
+);
+
+const TrashIcon = ({ size = 14 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 6h18" />
+    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    <path d="M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14" />
+  </svg>
+);
+
 
 const SectionHeader = ({ children, right }) => (
   <div style={{
@@ -34,7 +49,7 @@ const SectionHeader = ({ children, right }) => (
 
 const IfaceCard = ({ iface, accent, ns, onEditIface, onDeleteVeth, onOpenBridgeVlanModal }) => (
   <div style={{
-    background: T.surface, border: `1px solid ${T.line}`, borderRadius: 6,
+    background: T.bg, border: `1px solid ${T.lineSoft}`, borderRadius: 6,
     padding: '10px 12px', marginBottom: 8,
   }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -90,7 +105,7 @@ const IfaceCard = ({ iface, accent, ns, onEditIface, onDeleteVeth, onOpenBridgeV
 export function Inspector({
   ns, bridges, veths, vlans, bridgeVlans, ipForwardMap, namespaces,
   onClose, onDeleteNs, onDeleteVeth, onEditIface, onToggleIpForward, onOpenTerminal,
-  onShowRouteTable, onShowArpTable, onShowMacTable,
+  onShowRouteTable, onShowArpTable, onShowMacTable, onShowIptables,
   onOpenBridgeVlanModal, onOpenVlanModal, onDeleteVlan, onToggleBridgeVlanFiltering,
   dockerReady,
 }) {
@@ -121,13 +136,14 @@ export function Inspector({
 
   return (
     <div style={{
-      width: 320, borderLeft: `1px solid ${T.line}`, background: T.bg,
+      width: 320, borderLeft: `1px solid ${T.surfaceHi}`, background: T.surface,
       display: 'flex', flexDirection: 'column', flexShrink: 0, overflow: 'hidden',
     }}>
       {/* Title bar */}
       <div style={{
         display: 'flex', alignItems: 'center',
         padding: '10px 16px', borderBottom: `1px solid ${T.line}`,
+        background: `linear-gradient(180deg, ${accent}0d 0%, transparent 65%), linear-gradient(180deg, ${T.surface2} 0%, ${T.surface} 100%)`,
       }}>
         <span style={{ fontSize: 12, color: T.textDim, fontFamily: T.fontMono, flex: 1 }}>
           インスペクタ
@@ -139,16 +155,17 @@ export function Inspector({
       </div>
 
       {/* Scrollable content */}
-      <div style={{ flex: 1, overflow: 'auto', scrollbarGutter: 'stable' }}>
+      <div className="inspector-scroll" style={{ flex: 1, overflow: 'auto', scrollbarGutter: 'stable', background: T.surface }}>
 
         {/* Hero */}
         <div style={{ padding: '16px 16px 12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, height: 40 }}>
             <div style={{
               width: 40, height: 40, borderRadius: 10,
-              background: accent + '20', border: `1px solid ${accent}40`,
+              background: `linear-gradient(135deg, ${accent}33, ${accent}14)`, border: `1px solid ${accent}55`,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 18, color: accent, flexShrink: 0,
+              boxShadow: `0 0 0 3px ${accent}0a, inset 0 1px 0 rgba(255,255,255,0.05)`,
             }}>
               {role === 'switch' ? '⬡' : role === 'router' ? '⇌' : '▪'}
             </div>
@@ -157,17 +174,6 @@ export function Inspector({
                 {ns.name}
               </div>
             </div>
-            {dockerReady && (
-              <button onClick={() => onOpenTerminal(ns)} style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                padding: '6px 12px', fontSize: 11, fontFamily: T.fontMono, fontWeight: 500,
-                background: T.surface, color: T.textMid,
-                border: `1px solid ${T.line}`, borderRadius: 6, cursor: 'pointer', flexShrink: 0,
-              }}>
-                <span style={{ fontWeight: 600 }}>&gt;_</span>
-                <span>ターミナル</span>
-              </button>
-            )}
           </div>
         </div>
 
@@ -175,6 +181,7 @@ export function Inspector({
         <div style={{
           display: 'flex', borderBottom: `1px solid ${T.line}`,
           padding: '0 16px',
+          background: T.surface,
         }}>
           {[{ id: 'overview', label: '概要' }, { id: 'tables', label: 'テーブル' }].map(t => {
             const active = activeTab === t.id;
@@ -182,7 +189,7 @@ export function Inspector({
               <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
                 padding: '10px 12px', fontSize: 11, fontFamily: T.fontMono,
                 color: active ? T.text : T.textDim, background: 'transparent',
-                border: 'none', borderBottom: active ? `2px solid ${T.indigo}` : '2px solid transparent',
+                border: 'none', borderBottom: active ? `2px solid ${accent}` : '2px solid transparent',
                 cursor: 'pointer', fontWeight: active ? 600 : 400,
                 letterSpacing: '0.05em',
               }}>
@@ -201,27 +208,34 @@ export function Inspector({
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <button onClick={() => onShowRouteTable?.(ns)} style={{
                   padding: '8px 12px', fontSize: 11, fontFamily: T.fontMono, fontWeight: 500,
-                  background: T.surface, color: T.textMid, textAlign: 'left',
-                  border: `1px solid ${T.line}`, borderRadius: 5, cursor: 'pointer',
+                  background: T.bg, color: T.textMid, textAlign: 'left',
+                  border: `1px solid ${T.lineSoft}`, borderRadius: 5, cursor: 'pointer',
                 }}>
                   ルーティングテーブル
                 </button>
                 <button onClick={() => onShowArpTable?.(ns)} style={{
                   padding: '8px 12px', fontSize: 11, fontFamily: T.fontMono, fontWeight: 500,
-                  background: T.surface, color: T.textMid, textAlign: 'left',
-                  border: `1px solid ${T.line}`, borderRadius: 5, cursor: 'pointer',
+                  background: T.bg, color: T.textMid, textAlign: 'left',
+                  border: `1px solid ${T.lineSoft}`, borderRadius: 5, cursor: 'pointer',
                 }}>
                   ARPテーブル
                 </button>
                 {nsBridges.length > 0 && (
                   <button onClick={() => onShowMacTable?.(ns)} style={{
                     padding: '8px 12px', fontSize: 11, fontFamily: T.fontMono, fontWeight: 500,
-                    background: T.surface, color: T.textMid, textAlign: 'left',
-                    border: `1px solid ${T.line}`, borderRadius: 5, cursor: 'pointer',
+                    background: T.bg, color: T.textMid, textAlign: 'left',
+                    border: `1px solid ${T.lineSoft}`, borderRadius: 5, cursor: 'pointer',
                   }}>
                     MACアドレステーブル
                   </button>
                 )}
+                <button onClick={() => onShowIptables?.(ns)} style={{
+                  padding: '8px 12px', fontSize: 11, fontFamily: T.fontMono, fontWeight: 500,
+                  background: T.bg, color: T.textMid, textAlign: 'left',
+                  border: `1px solid ${T.lineSoft}`, borderRadius: 5, cursor: 'pointer',
+                }}>
+                  iptables
+                </button>
               </div>
               {!dockerReady && (
                 <div style={{ color: T.textDim, fontSize: 11, fontFamily: T.fontMono, padding: '20px 0', textAlign: 'center' }}>
@@ -277,7 +291,7 @@ export function Inspector({
               <SectionHeader>ブリッジ &middot; {nsBridges.length}</SectionHeader>
               {nsBridges.map(b => (
                 <div key={b.id} style={{
-                  background: T.surface, border: `1px solid ${T.line}`, borderRadius: 6,
+                  background: T.bg, border: `1px solid ${T.lineSoft}`, borderRadius: 6,
                   padding: '10px 12px', marginBottom: 8,
                 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, fontFamily: T.fontMono, color: T.text }}>
@@ -357,7 +371,7 @@ export function Inspector({
                 }>{b.name} &middot; 仮想IF &middot; {sviList.length}</SectionHeader>
                 {sviList.map(vl => (
                   <div key={vl.id} style={{
-                    background: T.surface, border: `1px solid ${T.line}`, borderRadius: 6,
+                    background: T.bg, border: `1px solid ${T.lineSoft}`, borderRadius: 6,
                     padding: '10px 12px', marginBottom: 8,
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: vl.ip ? 8 : 0 }}>
@@ -429,17 +443,32 @@ export function Inspector({
 
       {/* Action bar */}
       <div style={{
-        padding: '10px 16px', borderTop: `1px solid ${T.line}`,
-        display: 'flex', flexWrap: 'wrap', gap: 6,
+        padding: '10px 14px', borderTop: `1px solid ${T.surfaceHi}`,
+        display: 'flex', alignItems: 'center', gap: 8,
+        background: T.bg2,
+        boxShadow: '0 -1px 0 rgba(255,255,255,0.03) inset',
       }}>
+        {dockerReady && (
+          <button onClick={() => onOpenTerminal(ns)} style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            height: 32, padding: '0 14px', fontSize: 12, fontFamily: T.fontMono, fontWeight: 500,
+            letterSpacing: '0.02em', color: '#04140a', background: T.green,
+            border: 'none', borderRadius: 6, cursor: 'pointer',
+            boxShadow: `0 1px 0 rgba(255,255,255,0.2) inset, 0 4px 14px ${T.green}52`,
+          }}>
+            <TerminalIcon />
+            ターミナル
+          </button>
+        )}
         <div style={{ flex: 1 }} />
         <button onClick={() => onDeleteNs(ns.id)} style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          padding: '6px 12px', fontSize: 11, fontFamily: T.fontMono, fontWeight: 500,
-          background: T.surface, color: T.textMid,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+          height: 32, padding: '0 12px', fontSize: 11.5, fontFamily: T.fontMono, fontWeight: 500,
+          background: 'transparent', color: T.textMid,
           border: `1px solid ${T.line}`, borderRadius: 6, cursor: 'pointer',
         }}>
-          {ns.name} を削除
+          <TrashIcon />
+          削除
         </button>
       </div>
     </div>

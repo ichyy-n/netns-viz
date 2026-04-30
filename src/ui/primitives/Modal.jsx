@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { COLORS } from "../../theme.js";
 import { Icon, Icons } from "./Icon.jsx";
 
-export const Modal = ({ title, onClose, children, width = 420 }) => {
+export const Modal = ({ title, onClose, children, width = 420, shellStyle, headerStyle, bodyStyle, footer, headerIcon, headerColor }) => {
   const [pos, setPos] = useState({ x: null, y: null });
   const [dragging, setDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
@@ -46,20 +46,46 @@ export const Modal = ({ title, onClose, children, width = 420 }) => {
         position: "absolute", left: pos.x, top: pos.y, width, pointerEvents: "auto",
         background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12,
         maxHeight: "80vh", overflow: "auto", boxShadow: "0 25px 50px rgba(0,0,0,0.5)",
+        ...shellStyle,
       }}>
         <div onMouseDown={onHeaderMouseDown} style={{
           display: "flex", justifyContent: "space-between", alignItems: "center",
           padding: "16px 20px", borderBottom: `1px solid ${COLORS.border}`,
           cursor: "grab", userSelect: "none",
+          ...headerStyle,
         }}>
-          <span style={{ color: COLORS.text, fontWeight: 700, fontSize: 14, fontFamily: "'JetBrains Mono', monospace" }}>
+          {headerIcon && (
+            <div style={{
+              width: 24, height: 24, borderRadius: 6,
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              background: `${headerColor || COLORS.accent}22`,
+              color: headerColor || COLORS.accent,
+              marginRight: 10,
+              flexShrink: 0,
+            }}>
+              {headerIcon}
+            </div>
+          )}
+          <span style={{ color: COLORS.text, fontWeight: 700, fontSize: 14, fontFamily: "'JetBrains Mono', monospace", flex: 1 }}>
             {title}
           </span>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
             <Icon d={Icons.x} color={COLORS.textMuted} />
           </button>
         </div>
-        <div style={{ padding: 20 }}>{children}</div>
+        <div style={{ padding: 20, ...bodyStyle }}>{children}</div>
+        {footer && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8,
+            padding: "10px 14px",
+            borderTop: `1px solid ${COLORS.border}`,
+            ...bodyStyle,
+            paddingTop: 10,
+            paddingBottom: 10,
+          }}>
+            {footer}
+          </div>
+        )}
       </div>
     </div>
   );

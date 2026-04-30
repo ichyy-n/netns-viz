@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { COLORS, NS_COLORS, NS_W, TOKENS } from "./theme.js";
 import { uid } from "./logic/ids.js";
-import { validateCidr, CIDR_ERROR_MSG } from "./logic/validation.js";
+import { validateCidr, CIDR_ERROR_MSG, validateRouteDestination, ROUTE_DEST_ERROR_MSG } from "./logic/validation.js";
 import { getInterfacePositions } from "./logic/topology.js";
 import { enrichBridgeVlans } from "./logic/enrich.js";
 import { defaultState, loadGuiState, saveGuiState } from "./logic/state.js";
@@ -19,12 +19,12 @@ import { MacTableModal } from "./ui/modals/MacTableModal.jsx";
 import { BridgeAddModal } from "./ui/modals/BridgeAddModal.jsx";
 import { NsAddModal } from "./ui/modals/NsAddModal.jsx";
 import { VethAddModal } from "./ui/modals/VethAddModal.jsx";
-import { RouteAddModal } from "./ui/modals/RouteAddModal.jsx";
 import { CommandAddModal } from "./ui/modals/CommandAddModal.jsx";
 import { IfaceModal } from "./ui/modals/IfaceModal.jsx";
 import { VlanModal } from "./ui/modals/VlanModal.jsx";
 import { BridgeVlanModal } from "./ui/modals/BridgeVlanModal.jsx";
 import { IptablesModal } from "./ui/modals/IptablesModal.jsx";
+import { NAVY, NavyButton, tableModalStyles } from "./ui/modals/tableTheme.jsx";
 import { HostTerminal } from "./ui/terminal/HostTerminal.jsx";
 import { NsTerminal } from "./ui/terminal/NsTerminal.jsx";
 import { VethEdge } from "./ui/canvas/VethEdge.jsx";
@@ -33,6 +33,15 @@ import { Canvas } from "./ui/canvas/Canvas.jsx";
 import { Inspector } from "./ui/inspector/Inspector.jsx";
 
 const isElectron = () => Boolean(window.electronAPI);
+const DOCK_MIN_HEIGHT = 140;
+const DOCK_DEFAULT_HEIGHT = 260;
+const DOCK_VIEWPORT_MARGIN = 120;
+
+const clampDockHeight = (height) => {
+  if (typeof window === "undefined") return Math.max(DOCK_MIN_HEIGHT, height);
+  const maxHeight = Math.max(DOCK_MIN_HEIGHT, window.innerHeight - DOCK_VIEWPORT_MARGIN);
+  return Math.min(maxHeight, Math.max(DOCK_MIN_HEIGHT, height));
+};
 
 /* ══════════════════════════════════════════════
    MAIN APP
@@ -56,6 +65,8 @@ export default function NetnsVisualizer() {
   const [activeTermTab, setActiveTermTab] = useState(null);
   const [showTerminal, setShowTerminal] = useState(false);
   const [dockMaximized, setDockMaximized] = useState(false);
+  const [dockHeight, setDockHeight] = useState(DOCK_DEFAULT_HEIGHT);
+  const [dockResizing, setDockResizing] = useState(null);
   const [execLog, setExecLog] = useState([]);
   const [routeModal, setRouteModal] = useState(null);
   const [macTableModal, setMacTableModal] = useState(null);
@@ -88,6 +99,43 @@ export default function NetnsVisualizer() {
   useEffect(() => {
     saveGuiState(state);
   }, [state]);
+
+  const startDockResize = useCallback((e) => {
+    if (dockMaximized) return;
+    e.preventDefault();
+    setDockResizing({ startY: e.clientY, startHeight: dockHeight });
+  }, [dockMaximized, dockHeight]);
+
+  const adjustDockHeight = useCallback((delta) => {
+    setDockHeight((height) => clampDockHeight(height + delta));
+  }, []);
+
+  useEffect(() => {
+    if (!dockResizing) return;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = "ns-resize";
+    document.body.style.userSelect = "none";
+
+    const onMove = (e) => {
+      setDockHeight(clampDockHeight(dockResizing.startHeight + dockResizing.startY - e.clientY));
+    };
+    const onUp = () => setDockResizing(null);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [dockResizing]);
+
+  useEffect(() => {
+    const onResize = () => setDockHeight((height) => clampDockHeight(height));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   /* ── Docker ── */
   const startDocker = useCallback(async () => {
@@ -589,6 +637,47 @@ export default function NetnsVisualizer() {
     });
   }, []);
 
+  const addRouteRule = useCallback(async (data, refreshTable = false) => {
+    if (!validateRouteDestination(data.dest)) {
+      alert(ROUTE_DEST_ERROR_MSG);
+      return false;
+    }
+    if (!data.gateway && !data.iface) {
+      alert("GATEWAYまたはINTERFACEのいずれかを入力してください");
+      return false;
+    }
+    const ns = namespaces.find(n => n.id === data.nsId);
+    if (dockerReady && ns) {
+      const dev = data.iface ? ` dev ${data.iface}` : "";
+      const via = data.gateway ? ` via ${data.gateway}` : "";
+      const r = await execAndLog(`ip netns exec ${ns.name} ip route add ${data.dest}${via}${dev}`);
+      if (!r.success) { alert(`ルート追加失敗: ${r.output}`); return false; }
+    }
+    update(s => s.routes.push({ id: uid(), nsId: data.nsId, dest: data.dest, gateway: data.gateway, iface: data.iface }));
+    if (refreshTable && ns && dockerReady) await showRouteTable(ns);
+    return true;
+  }, [namespaces, dockerReady, execAndLog, update, showRouteTable]);
+
+  const deleteRouteRule = useCallback(async (data, refreshTable = false) => {
+    const ns = namespaces.find(n => n.id === data.nsId);
+    if (dockerReady && ns) {
+      const dev = data.iface ? ` dev ${data.iface}` : "";
+      const via = data.gateway ? ` via ${data.gateway}` : "";
+      const r = await execAndLog(`ip netns exec ${ns.name} ip route del ${data.dest}${via}${dev}`);
+      if (!r.success) { alert(`ルート削除失敗: ${r.output}`); return false; }
+    }
+    update(s => {
+      s.routes = s.routes.filter(r => !(
+        r.nsId === data.nsId &&
+        r.dest === data.dest &&
+        (r.gateway || '') === (data.gateway || '') &&
+        (r.iface || '') === (data.iface || '')
+      ));
+    });
+    if (refreshTable && ns && dockerReady) await showRouteTable(ns);
+    return true;
+  }, [namespaces, dockerReady, execAndLog, update, showRouteTable]);
+
   const openIfaceModal = useCallback((vethId, end, ifaceName, nsName, currentIp, currentMac) => {
     setIfaceModal({ vethId, end, ifaceName, nsName, currentIp: currentIp || '', currentMac: currentMac || '', newIp: '', newMac: '' });
   }, []);
@@ -807,7 +896,6 @@ export default function NetnsVisualizer() {
   const addNs = () => { const i = namespaces.length; setModal({ type: "addNs", data: { name: `ns${i+1}` } }); };
   const addBridge = () => setModal({ type: "addBridge", data: { name: `br${bridges.length}`, nsId: namespaces[0]?.id||"", ip: "", vlanFiltering: true } });
   const addVeth = () => { const i = veths.length+1; setModal({ type: "addVeth", data: { name: `veth-pair-${i}`, endAName: `veth${i}a`, endANs: namespaces[0]?.id||"", endAIp: "", endAMac: "", endABridge: "", endBName: `veth${i}b`, endBNs: namespaces[1]?.id||namespaces[0]?.id||"", endBIp: "", endBMac: "", endBBridge: "" } }); };
-  const addRoute = () => setModal({ type: "addRoute", data: { nsId: namespaces[0]?.id||"", dest: "", gateway: "", iface: "" } });
   const addCommand = () => setModal({ type: "addCommand", data: { nsId: namespaces[0]?.id||"", cmds: "" } });
 
   const confirmModal = async () => {
@@ -860,17 +948,8 @@ export default function NetnsVisualizer() {
         swapped: false
       }));
     } else if (type === "addRoute") {
-      if (!data.gateway && !data.iface) {
-        alert("GATEWAYまたはINTERFACEのいずれかを入力してください");
-        return;
-      }
-      const ns = namespaces.find(n => n.id === data.nsId);
-      if (dockerReady && ns) {
-        const dev = data.iface ? ` dev ${data.iface}` : "";
-        const via = data.gateway ? ` via ${data.gateway}` : "";
-        await execAndLog(`ip netns exec ${ns.name} ip route add ${data.dest}${via}${dev}`);
-      }
-      update(s => s.routes.push({ id: uid(), nsId: data.nsId, dest: data.dest, gateway: data.gateway, iface: data.iface }));
+      const ok = await addRouteRule(data);
+      if (!ok) return;
     } else if (type === "addCommand") {
       const ns = namespaces.find(n => n.id === data.nsId);
       if (dockerReady && ns) {
@@ -963,15 +1042,13 @@ export default function NetnsVisualizer() {
      ══════════════════════════════════════════════ */
   return (
     <div style={{ width: "100vw", height: "100vh", background: COLORS.bg, display: "flex", flexDirection: "column", fontFamily: "'Segoe UI', system-ui, sans-serif", color: COLORS.text, overflow: "hidden" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:${COLORS.bg}}::-webkit-scrollbar-thumb{background:${COLORS.border};border-radius:3px}`}</style>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:${COLORS.bg}}::-webkit-scrollbar-thumb{background:${COLORS.border};border-radius:3px}.inspector-scroll{scrollbar-color:${TOKENS.surfaceHi} transparent;scrollbar-width:thin}.inspector-scroll::-webkit-scrollbar{width:8px;height:8px}.inspector-scroll::-webkit-scrollbar-track{background:transparent}.inspector-scroll::-webkit-scrollbar-thumb{background:${TOKENS.surfaceHi};border-radius:4px}.inspector-scroll::-webkit-scrollbar-thumb:hover{background:#2e2e38}`}</style>
 
       {/* ── Top Bar (Row 1) ── */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 16px", borderBottom: `1px solid ${TOKENS.line}`, background: TOKENS.bg2, flexShrink: 0 }}>
         {/* Logo + name */}
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 26, height: 26, borderRadius: 7, background: `linear-gradient(135deg, ${TOKENS.indigo}, ${TOKENS.magenta})`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Icon d={Icons.network} size={14} color="#fff" />
-          </div>
+          <div style={{ width: 26, height: 26, borderRadius: 7, background: `linear-gradient(135deg, ${TOKENS.indigo}, ${TOKENS.magenta})` }} />
           <span style={{ fontFamily: TOKENS.fontMono, fontWeight: 700, fontSize: 14, color: TOKENS.text }}>netns-viz</span>
         </div>
 
@@ -1064,16 +1141,6 @@ export default function NetnsVisualizer() {
           <Icon d={Icons.plus} size={11} color={TOKENS.text} />
           veth ペア
         </button>
-        <button onClick={addRoute} disabled={!namespaces.length} style={{
-          display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", fontSize: 11,
-          fontFamily: TOKENS.fontMono, fontWeight: 500,
-          background: "transparent", color: TOKENS.textMid,
-          border: "none", borderRadius: 5,
-          cursor: namespaces.length ? "pointer" : "not-allowed", opacity: namespaces.length ? 1 : 0.4,
-        }}>
-          <Icon d={Icons.plus} size={11} color={TOKENS.text} />
-          ルート
-        </button>
         <button onClick={addCommand} disabled={!namespaces.length} style={{
           display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", fontSize: 11,
           fontFamily: TOKENS.fontMono, fontWeight: 500,
@@ -1082,7 +1149,7 @@ export default function NetnsVisualizer() {
           cursor: namespaces.length ? "pointer" : "not-allowed", opacity: namespaces.length ? 1 : 0.4,
         }}>
           <Icon d={Icons.plus} size={11} color={TOKENS.text} />
-          コマンド
+          カスタムコマンド
         </button>
 
         <div style={{ flex: 1 }} />
@@ -1135,8 +1202,9 @@ export default function NetnsVisualizer() {
       </div>
 
       {/* ── Main Area ── */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", paddingBottom: !showTerminal ? 28 : 0 }}>
-        <div style={{ flex: dockMaximized && showTerminal ? 0 : 1, display: dockMaximized && showTerminal ? "none" : "flex", overflow: "hidden" }}>
+      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
+          <div style={{ flex: dockMaximized && showTerminal ? 0 : 1, display: dockMaximized && showTerminal ? "none" : "flex", overflow: "hidden" }}>
 
           {/* ── Canvas ── */}
           <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
@@ -1211,38 +1279,47 @@ export default function NetnsVisualizer() {
             </div>*/}
           </div>
 
-          {/* ── Inspector Panel ── */}
-          {selected && (
-            <Inspector
-              ns={namespaces.find(n => n.id === selected)}
-              bridges={bridges}
-              veths={veths}
-              vlans={vlans}
-              bridgeVlans={bridgeVlans}
-              namespaces={namespaces}
-              ipForwardMap={ipForwardMap}
-              dockerReady={dockerReady}
-              onClose={() => setSelected(null)}
-              onDeleteNs={deleteNs}
-              onDeleteVeth={deleteVeth}
-              onEditIface={openIfaceModal}
-              onToggleIpForward={toggleIpForward}
-              onOpenTerminal={openTerminal}
-              onShowRouteTable={showRouteTable}
-              onShowArpTable={showArpTable}
-              onShowMacTable={showMacTable}
-              onOpenBridgeVlanModal={openBridgeVlanModal}
-              onOpenVlanModal={openVlanModal}
-              onDeleteVlan={deleteVlan}
-              onToggleBridgeVlanFiltering={toggleBridgeVlanFiltering}
-            />
-          )}
+          </div>
 
-        </div>
-
-        {/* ── Bottom Dock (実行ログ + ターミナル統合) ── */}
-        {showTerminal && (
-          <div style={{ height: dockMaximized ? "100%" : 260, flex: dockMaximized ? 1 : "none", borderTop: `1px solid ${TOKENS.line}`, background: TOKENS.surface, display: "flex", flexDirection: "column", flexShrink: 0 }}>
+          {/* ── Bottom Dock (実行ログ + ターミナル統合) ── */}
+          {showTerminal && (
+            <div style={{ height: dockMaximized ? "100%" : dockHeight, flex: dockMaximized ? 1 : "none", borderTop: `1px solid ${TOKENS.line}`, background: TOKENS.surface, display: "flex", flexDirection: "column", flexShrink: 0, position: "relative" }}>
+            <div
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label="ボトムウィンドウの高さ"
+              tabIndex={dockMaximized ? -1 : 0}
+              onMouseDown={startDockResize}
+              onDoubleClick={() => setDockHeight(DOCK_DEFAULT_HEIGHT)}
+              onKeyDown={(e) => {
+                if (dockMaximized) return;
+                if (e.key === "ArrowUp") { e.preventDefault(); adjustDockHeight(16); }
+                if (e.key === "ArrowDown") { e.preventDefault(); adjustDockHeight(-16); }
+                if (e.key === "Home") { e.preventDefault(); setDockHeight(DOCK_MIN_HEIGHT); }
+                if (e.key === "End") { e.preventDefault(); setDockHeight(clampDockHeight(window.innerHeight)); }
+              }}
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                top: -4,
+                height: 8,
+                cursor: dockMaximized ? "default" : "ns-resize",
+                zIndex: 3,
+                outline: "none",
+              }}
+            >
+              <div style={{
+                position: "absolute",
+                left: "50%",
+                top: 3,
+                width: 36,
+                height: 2,
+                transform: "translateX(-50%)",
+                borderRadius: 1,
+                background: dockResizing ? TOKENS.indigo : TOKENS.line,
+              }} />
+            </div>
             <div style={{ display: "flex", alignItems: "center", gap: 0, borderBottom: `1px solid ${TOKENS.line}`, background: TOKENS.bg2, flexShrink: 0, overflow: "auto" }}>
               {/* 実行ログタブ（常駐） */}
               <div onClick={() => setActiveTermTab('__log__')}
@@ -1328,33 +1405,62 @@ export default function NetnsVisualizer() {
                 </div>
               ))}
             </div>
-          </div>
+            </div>
+          )}
+
+          {/* ── Minimized Dock Bar ── */}
+          {!showTerminal && (
+            <div style={{ height: 28, display: "flex", alignItems: "center", padding: "0 8px", background: TOKENS.bg2, borderTop: `1px solid ${TOKENS.line}`, gap: 4, flexShrink: 0 }}>
+              <button onClick={() => { setShowTerminal(true); setActiveTermTab('__log__'); }}
+                style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 8px", height: 20, fontFamily: TOKENS.fontMono, fontSize: 10.5, color: TOKENS.textMid, background: "transparent", border: "none", cursor: "pointer", borderRadius: 3 }}>
+                <Icon d={Icons.code} size={11} color={TOKENS.textDim} />
+                実行ログ
+              </button>
+              {terminalTabs.map(t => (
+                <button key={t.tabId} onClick={() => { setShowTerminal(true); setActiveTermTab(t.tabId); }}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 8px", height: 20, fontFamily: TOKENS.fontMono, fontSize: 10.5, color: TOKENS.textMid, background: "transparent", border: "none", cursor: "pointer", borderRadius: 3 }}>
+                  <span style={{ width: 5, height: 5, borderRadius: 3, background: t.color, display: "inline-block" }} />
+                  {t.label}
+                </button>
+              ))}
+              <div style={{ flex: 1 }} />
+              <button onClick={() => setShowTerminal(true)}
+                style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", height: 20, fontFamily: TOKENS.fontMono, fontSize: 10.5, color: TOKENS.textMid, background: "transparent", border: "none", cursor: "pointer" }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="m6 15 6-6 6 6"/></svg>
+                開く
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* ── Inspector Panel ── */}
+        {selected && (
+          <Inspector
+            ns={namespaces.find(n => n.id === selected)}
+            bridges={bridges}
+            veths={veths}
+            vlans={vlans}
+            bridgeVlans={bridgeVlans}
+            namespaces={namespaces}
+            ipForwardMap={ipForwardMap}
+            dockerReady={dockerReady}
+            onClose={() => setSelected(null)}
+            onDeleteNs={deleteNs}
+            onDeleteVeth={deleteVeth}
+            onEditIface={openIfaceModal}
+            onToggleIpForward={toggleIpForward}
+            onOpenTerminal={openTerminal}
+            onShowRouteTable={showRouteTable}
+            onShowArpTable={showArpTable}
+            onShowMacTable={showMacTable}
+            onShowIptables={showIptables}
+            onOpenBridgeVlanModal={openBridgeVlanModal}
+            onOpenVlanModal={openVlanModal}
+            onDeleteVlan={deleteVlan}
+            onToggleBridgeVlanFiltering={toggleBridgeVlanFiltering}
+          />
         )}
       </div>
-
-      {/* ── Minimized Dock Bar ── */}
-      {!showTerminal && (
-        <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, height: 28, display: "flex", alignItems: "center", padding: "0 8px", background: TOKENS.bg2, borderTop: `1px solid ${TOKENS.line}`, gap: 4, zIndex: 5 }}>
-          <button onClick={() => { setShowTerminal(true); setActiveTermTab('__log__'); }}
-            style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 8px", height: 20, fontFamily: TOKENS.fontMono, fontSize: 10.5, color: TOKENS.textMid, background: "transparent", border: "none", cursor: "pointer", borderRadius: 3 }}>
-            <Icon d={Icons.code} size={11} color={TOKENS.textDim} />
-            実行ログ
-          </button>
-          {terminalTabs.map(t => (
-            <button key={t.tabId} onClick={() => { setShowTerminal(true); setActiveTermTab(t.tabId); }}
-              style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 8px", height: 20, fontFamily: TOKENS.fontMono, fontSize: 10.5, color: TOKENS.textMid, background: "transparent", border: "none", cursor: "pointer", borderRadius: 3 }}>
-              <span style={{ width: 5, height: 5, borderRadius: 3, background: t.color, display: "inline-block" }} />
-              {t.label}
-            </button>
-          ))}
-          <div style={{ flex: 1 }} />
-          <button onClick={() => setShowTerminal(true)}
-            style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", height: 20, fontFamily: TOKENS.fontMono, fontSize: 10.5, color: TOKENS.textDim, background: "transparent", border: "none", cursor: "pointer" }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="m6 15 6-6 6 6"/></svg>
-            開く
-          </button>
-        </div>
-      )}
 
       {/* ── Modals ── */}
       {modal?.type === "addNs" && (
@@ -1388,16 +1494,6 @@ export default function NetnsVisualizer() {
         />
       )}
 
-      {modal?.type === "addRoute" && (
-        <RouteAddModal
-          data={modal.data}
-          setData={d => setModal({ ...modal, data: d })}
-          onCancel={() => setModal(null)}
-          onConfirm={confirmModal}
-          namespaces={namespaces}
-        />
-      )}
-
       {modal?.type === "addCommand" && (
         <CommandAddModal
           data={modal.data}
@@ -1409,7 +1505,7 @@ export default function NetnsVisualizer() {
       )}
 
       {routeModal && (
-        <RouteModal routeModal={routeModal} setRouteModal={setRouteModal} showRouteTable={showRouteTable} />
+        <RouteModal routeModal={routeModal} setRouteModal={setRouteModal} showRouteTable={showRouteTable} addRouteRule={addRouteRule} deleteRouteRule={deleteRouteRule} />
       )}
 
       {macTableModal && (
@@ -1440,31 +1536,91 @@ export default function NetnsVisualizer() {
       )}
 
       {showCmd && (
-        <Modal title="生成されたコマンド" onClose={() => setShowCmd(false)} width={600}>
-          <pre style={{ background: COLORS.bg, color: COLORS.green, padding: 16, borderRadius: 8, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.7, overflow: "auto", maxHeight: 400, border: `1px solid ${COLORS.border}`, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+        <Modal
+          title="生成されたコマンド"
+          onClose={() => setShowCmd(false)}
+          width={640}
+          {...tableModalStyles}
+          headerIcon={
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m4 7 5 5-5 5" />
+              <path d="M12 17h8" />
+            </svg>
+          }
+          headerColor={NAVY.cyan}
+          footer={
+            <>
+              <NavyButton
+                icon={
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="9" y="9" width="11" height="11" rx="2" />
+                    <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+                  </svg>
+                }
+                onClick={() => navigator.clipboard?.writeText(cmdLog.join("\n"))}
+              >
+                コピー
+              </NavyButton>
+              <div style={{ flex: 1 }} />
+              <NavyButton onClick={() => setShowCmd(false)}>閉じる</NavyButton>
+            </>
+          }
+        >
+          <pre className="inspector-scroll" style={{
+            background: NAVY.bg,
+            color: NAVY.textMid,
+            padding: 16,
+            borderRadius: 8,
+            fontSize: 12,
+            fontFamily: TOKENS.fontMono,
+            lineHeight: 1.7,
+            overflow: "auto",
+            maxHeight: 400,
+            border: `1px solid ${NAVY.line}`,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-all",
+            boxShadow: '0 1px 0 rgba(255,255,255,0.04) inset',
+          }}>
             {cmdLog.join("\n")}
           </pre>
           {commands.length > 0 && (
-            <div style={{ marginTop: 16, borderTop: `1px solid ${COLORS.border}`, paddingTop: 12 }}>
-              <div style={{ fontSize: 11, color: COLORS.textMuted, marginBottom: 8 }}>カスタムコマンド</div>
+            <div style={{ marginTop: 16, borderTop: `1px solid ${NAVY.line}`, paddingTop: 12 }}>
+              <div style={{
+                fontSize: 10,
+                color: NAVY.textDim,
+                marginBottom: 8,
+                fontFamily: TOKENS.fontMono,
+                fontWeight: 600,
+                letterSpacing: '0.12em',
+                textTransform: 'uppercase',
+              }}>
+                カスタムコマンド
+              </div>
               {commands.map(cmd => {
                 const ns = namespaces.find(n => n.id === cmd.nsId);
                 return (
-                  <div key={cmd.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, padding: "4px 8px", background: COLORS.surface, borderRadius: 4, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
+                  <div key={cmd.id} style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    marginBottom: 6,
+                    padding: "6px 9px",
+                    background: NAVY.bg,
+                    border: `1px solid ${NAVY.lineSoft}`,
+                    borderRadius: 5,
+                    fontSize: 11,
+                    fontFamily: TOKENS.fontMono,
+                  }}>
                     <span style={{ color: ns?.color, fontWeight: 700, flexShrink: 0 }}>{ns?.name || "?"}</span>
-                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: COLORS.textDim }}>
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: NAVY.textMid }}>
                       {cmd.cmds.split('\n').filter(l => l.trim()).join('; ')}
                     </span>
-                    <span onClick={() => deleteCommand(cmd.id)} style={{ cursor: "pointer", color: COLORS.red, opacity: 0.5, fontSize: 10 }}>✕</span>
+                    <span onClick={() => deleteCommand(cmd.id)} style={{ cursor: "pointer", color: TOKENS.red, opacity: 0.75, fontSize: 10 }}>✕</span>
                   </div>
                 );
               })}
             </div>
           )}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
-            <Btn small ghost onClick={() => setShowCmd(false)}>閉じる</Btn>
-            <Btn small onClick={() => navigator.clipboard?.writeText(cmdLog.join("\n"))}>📋 コピー</Btn>
-          </div>
         </Modal>
       )}
     </div>

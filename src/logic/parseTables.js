@@ -17,6 +17,7 @@ export function parseRoutes(raw) {
       via: get('via'),
       dev: get('dev'),
       proto: get('proto'),
+      metric: get('metric'),
     };
   });
 }

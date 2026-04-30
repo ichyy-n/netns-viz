@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { COLORS, TOKENS } from "../../theme.js";
+import { TOKENS } from "../../theme.js";
 
 export const NsTerminal = ({ tabId, ns, dockerReady, isElectron, openShell, closeShell, sendCommand, killSession, writeSession, onShellData }) => {
   const [history, setHistory] = useState([]);
@@ -108,8 +108,8 @@ export const NsTerminal = ({ tabId, ns, dockerReady, isElectron, openShell, clos
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#000" }} onClick={() => inputRef.current?.focus()}>
-      <div style={{ flex: 1, overflow: "auto", padding: "8px 10px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.6 }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: TOKENS.bg }} onClick={() => inputRef.current?.focus()}>
+      <div className="inspector-scroll" style={{ flex: 1, overflow: "auto", padding: "8px 10px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.6 }}>
         <div style={{ color: TOKENS.textDim, marginBottom: 4 }}>
           namespace: <span style={{ color: TOKENS.textDim }}>{ns.name}</span> — コマンドは <span style={{ color: TOKENS.textDim }}>ip netns exec {ns.name}</span> で実行
         </div>
@@ -117,8 +117,8 @@ export const NsTerminal = ({ tabId, ns, dockerReady, isElectron, openShell, clos
         {history.map((entry, i) => (
           <div key={i}>
             {(entry.type === "cmd" || entry.type === "stdin")
-              ? <div><span style={{ color: entry.type === "stdin" ? COLORS.cyan : ns.color }}>{entry.type === "stdin" ? ">" : "$"}</span> <span style={{ color: COLORS.text }}>{entry.text}</span></div>
-              : <pre style={{ color: entry.type === "err" ? COLORS.red : COLORS.green, margin: "2px 0 6px 0", padding: 0, whiteSpace: "pre-wrap", wordBreak: "break-all", fontSize: 10, lineHeight: 1.5 }}>{entry.text}</pre>}
+              ? <div><span style={{ color: entry.type === "stdin" ? TOKENS.sky : ns.color }}>{entry.type === "stdin" ? ">" : "$"}</span> <span style={{ color: TOKENS.text }}>{entry.text}</span></div>
+              : <pre style={{ color: entry.type === "err" ? TOKENS.red : TOKENS.textMid, margin: "2px 0 6px 0", padding: 0, whiteSpace: "pre-wrap", wordBreak: "break-all", fontSize: 11.5, lineHeight: 1.5 }}>{entry.text}</pre>}
           </div>
         ))}
         <div ref={endRef} />
@@ -127,9 +127,9 @@ export const NsTerminal = ({ tabId, ns, dockerReady, isElectron, openShell, clos
         <span style={{ color: ns.color, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>$</span>
         <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={onKeyDown}
           placeholder={!shellReady ? "シェル未接続..." : running ? "実行中... (Ctrl+C で中断)" : "コマンドを入力..."} disabled={!dockerReady || !shellReady}
-          style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: COLORS.text, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", padding: "4px 0" }} />
+          style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: TOKENS.text, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", padding: "4px 0" }} />
         {running && (
-          <button onClick={killCmd} style={{ background: COLORS.red, color: "#fff", border: "none", borderRadius: 4, padding: "2px 8px", fontSize: 10, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>Stop</button>
+          <button onClick={killCmd} style={{ background: TOKENS.red, color: "#fff", border: "none", borderRadius: 4, padding: "2px 8px", fontSize: 10, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>Stop</button>
         )}
       </div>
     </div>

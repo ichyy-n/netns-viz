@@ -12,7 +12,7 @@ export const NS_COLORS = ["#3b82f6","#10b981","#f59e0b","#a855f7","#06b6d4","#ef
 export const NS_W = 250;
 export const NS_W_SWITCH = 220;
 export const NS_HEADER = 32;
-export const NS_ITEM_H = 36;
+export const NS_ITEM_H = 42;
 export const NS_FOOTER = 10;
 
 // Rail design tokens

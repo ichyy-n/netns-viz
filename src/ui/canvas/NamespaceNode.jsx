@@ -113,18 +113,21 @@ export const NamespaceNode = ({
       {/* interface rows */}
       {items.map((item, idx) => {
         const rowY = ns.y + NS_HEADER + idx * NS_ITEM_H;
+        const rowMidY = rowY + NS_ITEM_H / 2;
+        const upperTextY = rowMidY - 7;
+        const lowerTextY = rowMidY + 7;
         const indent = 0;
         return (
           <g key={(item.name || item.bridgeName) + idx}>
             {item.type === 'bridge' ? (<>
               {/* bridge: name · vlan_filtering N */}
-              <text x={ns.x + 12} y={rowY + 14} fill={T.text}
+              <text x={ns.x + 12} y={upperTextY} fill={T.text} dominantBaseline="middle"
                 fontSize={11} fontFamily={T.fontMono} fontWeight={500}>
                 {item.name}
                 <tspan> · vlan_filtering {item.vlanFiltering ? '1' : '0'}</tspan>
               </text>
               {/* bridge: N ports · N VLANs */}
-              <text x={ns.x + 12} y={rowY + 28} fill={T.textMid}
+              <text x={ns.x + 12} y={lowerTextY} fill={T.textMid} dominantBaseline="middle"
                 fontSize={10.5} fontFamily={T.fontMono}>
                 {item.ports} ports{item.vlanCount > 0 ? ` · ${item.vlanCount} VLANs` : ''}
               </text>
@@ -145,25 +148,25 @@ export const NamespaceNode = ({
               <rect x={ns.x + 6 + indent} y={rowY + 3} width={w - 12 - indent} height={NS_ITEM_H - 6}
                 rx={5} fill={T.surface} stroke={T.line} strokeWidth={1} />
               {/* state dot */}
-              <circle cx={ns.x + 16 + indent} cy={rowY + 14} r={3}
+              <circle cx={ns.x + 16 + indent} cy={upperTextY} r={3}
                 fill={item.type === 'svi' ? T.amber : item.type === 'vlan' ? T.indigo : color}
                 opacity={0.85} />
               {/* name */}
-              <text x={ns.x + 28 + indent} y={rowY + 14} fill={T.text}
+              <text x={ns.x + 28 + indent} y={upperTextY} fill={T.text} dominantBaseline="middle"
                 fontSize={11} fontFamily={T.fontMono} fontWeight={500}>
                 {item.name}
               </text>
               {/* ip */}
               {item.ip && (
-                <text x={ns.x + w - 14} y={rowY + 14} textAnchor="end"
+                <text x={ns.x + w - 14} y={upperTextY} textAnchor="end" dominantBaseline="middle"
                   fill={T.text} fontSize={11} fontFamily={T.fontMono} fontWeight={500}>
                   {item.ip}
                 </text>
               )}
               {/* mac */}
               {item.mac && (
-                <text x={ns.x + w - 14} y={rowY + 28} textAnchor="end" fill={T.textMid}
-                  fontSize={10.5} fontFamily={T.fontMono}>
+                <text x={ns.x + w - 14} y={lowerTextY} textAnchor="end" fill={T.textDim} dominantBaseline="middle"
+                  fontSize={9} fontFamily={T.fontMono}>
                   {item.mac}
                 </text>
               )}

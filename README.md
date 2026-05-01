@@ -107,11 +107,25 @@ dmg を開き、`netns-viz.app` を Applications フォルダにドラッグし�
 
 exe インストーラーを実行してください。
 
+## サンプルトポロジ
+
+`samples/` ディレクトリにすぐに試せるトポロジファイルが用意されています。アプリの「読込」からJSONファイルを選択してください。
+
+| ファイル | 内容 |
+|---------|------|
+| `switch.json` | L2スイッチ構成 |
+| `router.json` | ルータ構成 |
+| `ch01_vlan.json` | VLAN によるネットワーク分割 |
+| `ch02_routing.json` | スタティックルーティング |
+| `ch03_nat.json` | NAT / NAPT |
+| `ch04_firewall.json` | iptables によるファイアウォール |
+| `ch05_vlan_routing.json` | VLAN 間ルーティング |
+
 ## 使い方
 
 1. Docker Desktop を起動します。
 2. netns-viz を起動し、右上の `Docker 未接続` をクリックします。
-3. namespace を作成します。
+3. namespace を作成します。または「読込」からサンプルトポロジを読み込みます。
 4. veth pair、bridge、VLAN、IP アドレス、route、iptables などを設定します。
 5. ターミナル、ルーティングテーブル、ARP テーブル、MAC address table、iptables で動作を確認します。
 6. 必要に応じて JSON 保存、読み込み、セットアップスクリプト生成を使います。

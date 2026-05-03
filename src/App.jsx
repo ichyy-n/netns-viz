@@ -63,7 +63,7 @@ export default function NetnsVisualizer() {
   const logEndRef = useRef(null);
 
   const { namespaces, bridges, veths, vlans, bridgeVlans, routes, commands } = state;
-  const [showVlanSubIface] = useState(false);
+  const [_showVlanSubIface] = useState(false);
   const [ipForwardMap, setIpForwardMap] = useState({});
   const [iptablesMap, setIptablesMap] = useState({});
   const [iptablesModal, setIptablesModal] = useState(null);
@@ -153,7 +153,7 @@ export default function NetnsVisualizer() {
     return r;
   }, [dockerReady, addExecLog]);
 
-  const toggleIpForward = useCallback(async (ns) => {
+  const _toggleIpForward = useCallback(async (ns) => {
     const cur = ipForwardMap[ns.id] || false;
     const val = cur ? 0 : 1;
     const r = await execAndLog(`ip netns exec ${ns.name} sysctl -w net.ipv4.ip_forward=${val}`);
@@ -392,7 +392,7 @@ export default function NetnsVisualizer() {
   }, [activeTermTab]);
 
   /* ── VLAN functions ── */
-  const toggleBridgeVlanFiltering = useCallback(async (bridgeId) => {
+  const _toggleBridgeVlanFiltering = useCallback(async (bridgeId) => {
     const br = bridges.find(b => b.id === bridgeId);
     if (!br) return;
     const ns = namespaces.find(n => n.id === br.nsId);
@@ -408,7 +408,7 @@ export default function NetnsVisualizer() {
     });
   }, [bridges, namespaces, dockerReady, execAndLog, update]);
 
-  const openBridgeVlanModal = useCallback((bridgeId, bridgeName, dev, devType, vethId, vethEnd, nsId) => {
+  const _openBridgeVlanModal = useCallback((bridgeId, bridgeName, dev, devType, vethId, vethEnd, nsId) => {
     const existing = bridgeVlans.filter(bv => bv.bridgeId === bridgeId && bv.dev === dev);
     const hasAccessConfig = existing.length === 1 && existing[0].pvid && existing[0].untagged;
     const currentMode = existing.length === 0 ? 'access' : hasAccessConfig ? 'access' : 'trunk';
@@ -516,7 +516,7 @@ export default function NetnsVisualizer() {
     update(s => { s.bridgeVlans = s.bridgeVlans.filter(b => b.id !== bvId); });
   }, [bridgeVlans, namespaces, dockerReady, execAndLog, update]);
 
-  const openVlanModal = useCallback((vethId, end, ifaceName, nsId) => {
+  const _openVlanModal = useCallback((vethId, end, ifaceName, nsId) => {
     setVlanModal({ vethId, end, ifaceName, nsId, vlanId: '', ip: '', removeParentIp: false });
   }, []);
 
@@ -567,7 +567,7 @@ export default function NetnsVisualizer() {
     setArpTableModal({ nsId: ns.id, nsName: ns.name, nsColor: ns.color, entries: r.success ? r.output : 'Failed to fetch ARP table' });
   }, [dockerReady]);
 
-  const showIptables = useCallback((ns) => {
+  const _showIptables = useCallback((ns) => {
     setIptablesModal({
       nsId: ns.id,
       nsName: ns.name,
@@ -576,7 +576,7 @@ export default function NetnsVisualizer() {
     });
   }, []);
 
-  const openIfaceModal = useCallback((vethId, end, ifaceName, nsName, currentIp, currentMac) => {
+  const _openIfaceModal = useCallback((vethId, end, ifaceName, nsName, currentIp, currentMac) => {
     setIfaceModal({ vethId, end, ifaceName, nsName, currentIp: currentIp || '', currentMac: currentMac || '', newIp: '', newMac: '' });
   }, []);
 
@@ -617,7 +617,7 @@ export default function NetnsVisualizer() {
     setIfaceModal(null);
   }, [ifaceModal, dockerReady, execAndLog, update]);
 
-  const deleteVlan = useCallback(async (id) => {
+  const _deleteVlan = useCallback(async (id) => {
     const vl = vlans.find(v => v.id === id);
     if (dockerReady && vl) {
       const ns = namespaces.find(n => n.id === vl.nsId);
@@ -892,7 +892,7 @@ export default function NetnsVisualizer() {
   };
 
   /* ── Delete operations ── */
-  const deleteNs = async (id) => {
+  const _deleteNs = async (id) => {
     const ns = namespaces.find(n => n.id === id);
     if (dockerReady && ns) await execAndLog(`ip netns del ${ns.name}`);
     update(s => {
@@ -914,13 +914,13 @@ export default function NetnsVisualizer() {
     setSelected(null);
   };
 
-  const deleteBridge = async (id) => {
+  const _deleteBridge = async (id) => {
     const br = bridges.find(b => b.id === id);
     if (dockerReady && br) { const ns = namespaces.find(n => n.id === br.nsId); if (ns) await execAndLog(`ip netns exec ${ns.name} ip link del ${br.name}`); }
     update(s => { s.bridges = s.bridges.filter(b => b.id !== id); s.veths.forEach(v => { if (v.endA.bridge === id) v.endA.bridge = null; if (v.endB.bridge === id) v.endB.bridge = null; }); s.vlans = s.vlans.filter(vl => !(vl.parentType === 'bridge' && vl.parentId === id)); s.bridgeVlans = (s.bridgeVlans || []).filter(bv => bv.bridgeId !== id); });
   };
 
-  const deleteVeth = async (id) => {
+  const _deleteVeth = async (id) => {
     const v = veths.find(vv => vv.id === id);
     if (dockerReady && v) { const ns = namespaces.find(n => n.id === v.endA.nsId); if (ns) await execAndLog(`ip netns exec ${ns.name} ip link del ${v.endA.name}`); }
     update(s => { s.veths = s.veths.filter(v => v.id !== id); s.vlans = s.vlans.filter(vl => !(vl.parentType === 'veth' && vl.parentId === id)); s.bridgeVlans = (s.bridgeVlans || []).filter(bv => bv.vethId !== id); });

@@ -2,15 +2,17 @@ import { TOKENS as T } from '../../theme.js';
 import { IconStroke, ICONS } from '../shell/IconStroke.jsx';
 import { Chip } from '../shell/Chip.jsx';
 
-export const NS_W = 220;
-export const HEADER_H = 32;
-export const IF_ROW_H = 36;
-export const FOOTER_H = 10;
+const NS_W = 220;
+const HEADER_H = 32;
+const IF_ROW_H = 36;
+const FOOTER_H = 10;
 
-export function nodeHeight(ns) {
+function nodeHeight(ns) {
   const n = ns?.interfaces?.length ?? 0;
   return HEADER_H + IF_ROW_H * n + FOOTER_H;
 }
+
+export { HEADER_H, IF_ROW_H, NS_W };
 
 const COLOR = { switch: T.magenta, router: T.amber, host: T.sky };
 const COLOR_SOFT = { switch: T.magentaSoft, router: T.amberSoft, host: T.skySoft };

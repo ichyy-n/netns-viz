@@ -3,20 +3,13 @@ import { COLORS } from "../../theme.js";
 import { Icon, Icons } from "./Icon.jsx";
 
 export const Modal = ({ title, onClose, children, width = 420 }) => {
-  const [pos, setPos] = useState({ x: null, y: null });
+  const [pos, setPos] = useState(() => ({
+    x: Math.max(20, (window.innerWidth - width) / 2),
+    y: Math.max(20, window.innerHeight * 0.15),
+  }));
   const [dragging, setDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const modalRef = useRef(null);
-
-  // Center on first render
-  useEffect(() => {
-    if (pos.x === null) {
-      setPos({
-        x: Math.max(20, (window.innerWidth - width) / 2),
-        y: Math.max(20, window.innerHeight * 0.15),
-      });
-    }
-  }, []);
 
   useEffect(() => {
     if (!dragging) return;
@@ -37,8 +30,6 @@ export const Modal = ({ title, onClose, children, width = 420 }) => {
     setDragOffset({ x: e.clientX - rect.left, y: e.clientY - rect.top });
     setDragging(true);
   };
-
-  if (pos.x === null) return null;
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 1000, pointerEvents: "none" }}>

@@ -10,6 +10,7 @@ import { ContextMenu } from './ContextMenu.jsx';
 const LAYOUT_Y = { switch: 120, router: 240, host: 420 };
 const X_GAP = NS_W + 60;
 const COLLISION_X = NS_W + 40;
+const EMPTY_ARRAY = [];
 
 function computeAutoLayout(namespaces, links) {
   const placed = {};
@@ -131,8 +132,8 @@ export function RailCanvas({
   const [hoveredIface, setHoveredIface] = useState(null);
   const [ctxMenu, setCtxMenu] = useState(null);
 
-  const namespaces = railView?.namespaces || [];
-  const links = railView?.links || [];
+  const namespaces = railView?.namespaces ?? EMPTY_ARRAY;
+  const links = railView?.links ?? EMPTY_ARRAY;
 
   const nsList = useMemo(
     () => computeAutoLayout(namespaces, links),

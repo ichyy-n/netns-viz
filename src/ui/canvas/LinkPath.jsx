@@ -1,7 +1,7 @@
 import { TOKENS as T } from '../../theme.js';
 import { NS_W, HEADER_H, IF_ROW_H } from './NodeCard.jsx';
 
-export function portAnchor(ns, ifaceName) {
+function portAnchor(ns, ifaceName) {
   const ifaces = ns.interfaces || [];
   const idx = Math.max(0, ifaces.findIndex((i) => i.name === ifaceName));
   const y = (ns.y ?? 0) + HEADER_H + idx * IF_ROW_H + IF_ROW_H / 2;
@@ -10,7 +10,7 @@ export function portAnchor(ns, ifaceName) {
   return { xL, xR, y };
 }
 
-export function linkEndpoints(link, nsById) {
+function linkEndpoints(link, nsById) {
   const nsA = nsById[link.a.ns];
   const nsB = nsById[link.b.ns];
   if (!nsA || !nsB) return null;
@@ -24,6 +24,9 @@ export function linkEndpoints(link, nsById) {
     b: { x: aIsLeft ? pb.xL : pb.xR, y: pb.y },
   };
 }
+
+// eslint-disable-next-line react-refresh/only-export-components
+export { linkEndpoints };
 
 export function LinkPath({ link, endpoints, hot = false, dim = false, onContextMenu }) {
   if (!endpoints) return null;

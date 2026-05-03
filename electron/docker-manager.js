@@ -1,4 +1,5 @@
 /* global Buffer, process */
+/* eslint-disable no-control-regex */
 import Docker from 'dockerode'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -11,6 +12,9 @@ const __dirname = path.dirname(__filename)
 const docker = new Docker()
 const CONTAINER_NAME = 'netns-viz-lab'
 const IMAGE_NAME = 'netns-viz-lab:latest'
+const CONTROL_CHARS_RE = new RegExp('[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]', 'g')
+const ANSI_CSI_RE = new RegExp('\\x1b\\[[0-9;?]*[a-zA-Z]', 'g')
+const ANSI_OSC_RE = new RegExp('\\x1b\\][^\\x07\\x1b]*(?:\\x07|\\x1b\\\\)', 'g')
 
 let container = null
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -201,11 +205,11 @@ export async function execInContainer(cmd) {
               chunks.push(buf.slice(i + 8, i + 8 + size).toString('utf8'))
               i += 8 + size
             } else {
-              chunks.push(buf.slice(i).toString('utf8').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ''))
+              chunks.push(buf.slice(i).toString('utf8').replace(CONTROL_CHARS_RE, ''))
               break
             }
           } else {
-            chunks.push(buf.slice(i).toString('utf8').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ''))
+            chunks.push(buf.slice(i).toString('utf8').replace(CONTROL_CHARS_RE, ''))
             break
           }
         }
@@ -225,8 +229,8 @@ export async function execInContainer(cmd) {
 // ANSIエスケープシーケンス除去
 function stripAnsi(text) {
   return text
-    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')   // CSI sequences ([?2004h, 色コード等)
-    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '') // OSC sequences (ターミナルタイトル等)
+    .replace(ANSI_CSI_RE, '')   // CSI sequences ([?2004h, 色コード等)
+    .replace(ANSI_OSC_RE, '') // OSC sequences (ターミナルタイトル等)
     .replace(/\r/g, '')
 }
 

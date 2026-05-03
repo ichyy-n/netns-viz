@@ -6,6 +6,6 @@ export function inferRole(ns) {
 }
 
 // Phase B スタブ: Phase C で routing 情報が入ったら実装
-export function hasStaticRoute(ns) {
+export function hasStaticRoute() {
   return false;
 }

@@ -224,7 +224,7 @@ ipcMain.handle('file-save', async (event, data) => {
   return { success: true, filePath }
 })
 
-ipcMain.handle('file-load', async (event) => {
+ipcMain.handle('file-load', async () => {
   const win = BrowserWindow.getFocusedWindow()
   const { canceled, filePaths } = await dialog.showOpenDialog(win, {
     title: 'トポロジを開く',
